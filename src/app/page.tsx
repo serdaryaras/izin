@@ -8,8 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { getSupabaseClient, hasSupabaseEnv } from "@/lib/supabase";
-import { Database } from "@/types/supabase";
+import { type Database, getSupabaseClient, hasSupabaseEnv } from "@/lib/supabase";
 
 type Cinsiyet = "K" | "E";
 type IzinKod = "yillik" | "rapor" | "dis" | "evlilik" | "cenaze" | "dogum";
