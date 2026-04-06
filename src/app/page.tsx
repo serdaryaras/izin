@@ -855,7 +855,7 @@ export default function Home() {
 
   const mazeretTakvimYilSecenekleri = useMemo(() => {
     const c = bugun.getFullYear();
-    const lo = Math.min(c - 3, mazeretTakvimYil);
+    const lo = 2009;
     const hi = Math.max(c + 7, mazeretTakvimYil);
     return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
   }, [mazeretTakvimYil]);
@@ -1559,6 +1559,9 @@ export default function Home() {
                                 let zemini: string;
                                 if (secimde) {
                                   zemini = izinRenk[secTip];
+                                } else if (mevcut && buAy) {
+                                  // Mevcut izin gunleri yalnizca renkle isaretlenir (metin rozeti yok).
+                                  zemini = izinRenk[mevcut.izin_tipi];
                                 } else if (!buAy) {
                                   zemini = "bg-slate-50/50 text-slate-300";
                                 } else if (resmi) {
@@ -1578,7 +1581,7 @@ export default function Home() {
                                       disabled={!buAy}
                                       onClick={() => buAy && mazeretTakvimGunTik(iso)}
                                       className={[
-                                        "relative flex h-7 w-full min-w-0 items-center justify-center rounded-sm leading-none",
+                                        "flex h-6 w-full min-w-0 items-center justify-center rounded-sm leading-none",
                                         zemini,
                                         buAy ? "cursor-pointer hover:brightness-95" : "cursor-default opacity-60",
                                         ciroNokta ? "ring-2 ring-amber-500 ring-offset-1" : "",
@@ -1590,13 +1593,6 @@ export default function Home() {
                                       }
                                     >
                                       <span className={buAy ? "font-medium" : ""}>{gunTarih.getDate()}</span>
-                                      {mevcut && buAy && !secimde ? (
-                                        <span
-                                          className={`absolute bottom-0 left-0 right-0 truncate px-px text-[7px] font-bold leading-none ${izinRenk[mevcut.izin_tipi]}`}
-                                        >
-                                          {izinKisaltma[mevcut.izin_tipi]}
-                                        </span>
-                                      ) : null}
                                     </button>
                                   </td>
                                 );
