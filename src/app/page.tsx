@@ -1154,6 +1154,7 @@ export default function Home() {
       const rows = XLSX.utils.sheet_to_json(ws, {
         header: 1,
         defval: "",
+        raw: false,
       }) as unknown[][];
 
       if (rows.length === 0) {
