@@ -1294,9 +1294,10 @@ export default function Home() {
         : bugunRef;
       const horizon = ayrilis && ayrilis.getTime() < horizonAday.getTime() ? ayrilis : horizonAday;
 
-      const ozetSatirlari: Array<[string, number, number]> = [];
+      const devirKullanilan = Number(p.devir_onceki_kullanilan_izin ?? 0);
+      const ozetSatirlari: Array<[string, number | string, number]> = [];
       let toplamHak = 0;
-      let toplamKullanilan = 0;
+      let toplamKullanilan = devirKullanilan;
       for (let n = 0; n <= 80; n++) {
         const bas = new Date(hire.getFullYear() + n, hire.getMonth(), hire.getDate());
         if (bas.getTime() > horizon.getTime()) break;
@@ -1315,17 +1316,16 @@ export default function Home() {
             tatilMap,
           );
         }
-        if (n === 0) {
-          // Sistem oncesi kullanim bilgisi ilk kidem donemine eklenir.
-          kullanilan += Number(p.devir_onceki_kullanilan_izin ?? 0);
-        }
         ozetSatirlari.push([formatKisaTr(bas), hak, kullanilan]);
         toplamHak += hak;
         toplamKullanilan += kullanilan;
       }
 
       const ozetBaslik = ["Yillar", "Hakedilen", "Kullanilan"];
-      const ozetVeri = ozetSatirlari.map((r) => [r[0], r[1], r[2]]);
+      const ozetVeri = [
+        ["Devir", "", devirKullanilan],
+        ...ozetSatirlari.map((r) => [r[0], r[1], r[2]]),
+      ];
       const ws = XLSX.utils.aoa_to_sheet([
         baslik,
         ...satirlar,
@@ -1372,9 +1372,10 @@ export default function Home() {
         : bugunRef;
     const horizon = ayrilis && ayrilis.getTime() < horizonAday.getTime() ? ayrilis : horizonAday;
 
-    const rows: Array<{ bas: string; hak: number; kullanilan: number }> = [];
+    const devirKullanilan = Number(p.devir_onceki_kullanilan_izin ?? 0);
+    const rows: Array<{ bas: string; hak: number | string; kullanilan: number }> = [];
     let toplamHak = 0;
-    let toplamKullanilan = 0;
+    let toplamKullanilan = devirKullanilan;
     for (let n = 0; n <= 80; n++) {
       const basDate = new Date(hire.getFullYear() + n, hire.getMonth(), hire.getDate());
       if (basDate.getTime() > horizon.getTime()) break;
@@ -1394,11 +1395,11 @@ export default function Home() {
           tatilMap,
         );
       }
-      if (n === 0) kullanilan += Number(p.devir_onceki_kullanilan_izin ?? 0);
       rows.push({ bas: isoToDdMmYyyy(basIso), hak, kullanilan });
       toplamHak += hak;
       toplamKullanilan += kullanilan;
     }
+    rows.unshift({ bas: "Devir", hak: "", kullanilan: devirKullanilan });
     return { personelAd: p.ad, rows, toplamHak, toplamKullanilan };
   }, [selectedPersonelId, personeller, izinler, tatilMap]);
 
