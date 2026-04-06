@@ -138,21 +138,32 @@ function ddMmYyyyToIso(tr: string): string | null {
   const t = tr.replace(/\u00a0/g, " ").trim();
   if (!t) return null;
 
-  // Metin icinde tarih geciyorsa (or. "27.02.2017 Sal"), tarih parcasi yakalanir.
-  let m = /(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/.exec(t);
-  let day: number;
-  let month: number;
-  let year: number;
-  if (m) {
-    day = Number(m[1]);
-    month = Number(m[2]);
-    year = Number(m[3]);
+  let day: number | null = null;
+  let month: number | null = null;
+  let year: number | null = null;
+
+  // Metin icinde tarih geciyorsa (or. "27-02-2017 Pzt", "27-02-2017-ddddd"), tarih parcasi yakalanir.
+  const dmy = /(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/.exec(t);
+  if (dmy) {
+    day = Number(dmy[1]);
+    month = Number(dmy[2]);
+    year = Number(dmy[3]);
   } else {
     const ymd = /(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/.exec(t);
-    if (!ymd) return null;
-    year = Number(ymd[1]);
-    month = Number(ymd[2]);
-    day = Number(ymd[3]);
+    if (ymd) {
+      year = Number(ymd[1]);
+      month = Number(ymd[2]);
+      day = Number(ymd[3]);
+    }
+  }
+
+  // Son care: ISO datetime gibi degerler (or. 2017-02-28T00:00:00)
+  if (day == null || month == null || year == null) {
+    const parsed = new Date(t);
+    if (!Number.isNaN(parsed.getTime())) {
+      return toISODate(parsed);
+    }
+    return null;
   }
 
   const dt = new Date(year, month - 1, day);
