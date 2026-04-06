@@ -1401,62 +1401,96 @@ export default function Home() {
   }
 
   const yillikFormSayfalari = useMemo(() => {
-    const yilBas = `${yillikFormYil}-01-01`;
-    const yilSon = `${yillikFormYil}-12-31`;
+    const raporSon = `${yillikFormYil}-12-31`;
     return personeller
       .filter(personelAktifMi)
       .slice()
       .sort((a, b) => a.ad.localeCompare(b.ad, "tr"))
       .map((p) => {
-        const kayitlar = izinler
+        const iseDate = parseISODate(p.ise_giris);
+        const ayrilis = p.ayrilis_tarihi ? parseISODate(p.ayrilis_tarihi) : null;
+        const raporSonDate = parseISODate(raporSon);
+        const horizon =
+          ayrilis && ayrilis.getTime() < raporSonDate.getTime() ? ayrilis : raporSonDate;
+        const kaynakKayitlar = izinler
           .filter(
             (i) =>
               i.personel_id === p.id &&
               i.izin_tipi !== "rapor" &&
               i.izin_tipi !== "dis" &&
               i.bitis >= p.ise_giris &&
-              i.bitis >= yilBas &&
-              i.baslangic <= yilSon,
+              i.baslangic <= raporSon,
           )
           .slice()
           .sort((a, b) => a.baslangic.localeCompare(b.baslangic));
 
-        const iktisap = (() => {
-          const ise = parseISODate(p.ise_giris);
-          const grant = new Date(yillikFormYil, ise.getMonth(), ise.getDate());
-          return toISODate(grant);
-        })();
+        const kidemGruplari: Array<{
+          kidemYili: number;
+          donemBasIso: string;
+          donemSonIso: string;
+          toplamGun: number;
+          entries: Array<{
+            id: string;
+            tur: string;
+            basIso: string;
+            bitIso: string;
+            gun: number;
+          }>;
+        }> = [];
+        for (let n = 0; n <= 80; n++) {
+          const basDate = new Date(
+            iseDate.getFullYear() + n,
+            iseDate.getMonth(),
+            iseDate.getDate(),
+          );
+          if (basDate.getTime() > horizon.getTime()) break;
+          const sonrakiYil = new Date(
+            iseDate.getFullYear() + n + 1,
+            iseDate.getMonth(),
+            iseDate.getDate(),
+          );
+          const donemSon = new Date(sonrakiYil.getTime() - 86400000);
+          const kullanilanDonemSon =
+            donemSon.getTime() < horizon.getTime() ? donemSon : horizon;
+          const basIso = toISODate(basDate);
+          const donemSonIso = toISODate(kullanilanDonemSon);
+          const entries = kaynakKayitlar
+            .filter((k) => !(k.bitis < basIso || k.baslangic > donemSonIso))
+            .map((k) => {
+              const from = k.baslangic > basIso ? k.baslangic : basIso;
+              const to = k.bitis < donemSonIso ? k.bitis : donemSonIso;
+              const gun = from <= to ? yearlyLeaveCharge(from, to, tatilMap) : 0;
+              return {
+                id: `${k.id}-${n}-${from}-${to}`,
+                tur: izinTurleri.find((t) => t.kod === k.izin_tipi)?.ad ?? k.izin_tipi,
+                basIso: from,
+                bitIso: to,
+                gun,
+              };
+            });
+          const toplamGun = entries.reduce((s, e) => s + e.gun, 0);
+          if (entries.length > 0) {
+            kidemGruplari.push({
+              kidemYili: n,
+              donemBasIso: basIso,
+              donemSonIso,
+              toplamGun,
+              entries,
+            });
+          }
+        }
 
-        const entries = kayitlar.map((k) => {
-          const from = k.baslangic > yilBas ? k.baslangic : yilBas;
-          const to = k.bitis < yilSon ? k.bitis : yilSon;
-          const gun = from <= to ? yearlyLeaveCharge(from, to, tatilMap) : 0;
-          return {
-            id: k.id,
-            tur: izinTurleri.find((t) => t.kod === k.izin_tipi)?.ad ?? k.izin_tipi,
-            basIso: from,
-            bitIso: to,
-            gun,
-            yolIzni: "-",
-          };
-        });
-
-        const toplamGun = entries.reduce((s, e) => s + e.gun, 0);
-        const ilkBas = entries[0]?.basIso ?? "";
-        const sonBit = entries.length
-          ? entries[entries.length - 1].bitIso
-          : "";
+        const toplamGun = kidemGruplari.reduce((s, g) => s + g.toplamGun, 0);
 
         return {
           personel: p,
           yil: yillikFormYil,
-          iktisapIso: iktisap,
+          iktisapIso: p.ise_giris,
           toplamGun,
-          ilkBasIso: ilkBas,
-          sonBitIso: sonBit,
-          entries,
+          kidemGruplari,
         };
-      });
+      })
+      .filter((r) => r.kidemGruplari.length > 0);
   }, [yillikFormYil, personeller, izinler, tatilMap, izinTurleri]);
 
   async function yillikFormIndirWord() {
@@ -1487,78 +1521,86 @@ export default function Home() {
             heading: HeadingLevel.HEADING_2,
             alignment: AlignmentType.CENTER,
           }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: `Personel: ${r.personel.ad}   `, bold: true }),
-              new TextRun({ text: `Iktisap Tarihi: ${isoToDdMmYyyy(r.iktisapIso)}   ` }),
-              new TextRun({ text: `Toplam Gun: ${r.toplamGun}` }),
-            ],
-          }),
         ];
 
-        const rows = [
-          new TableRow({
-            children: ["Mazeret Turu", "Baslangic", "Son Gun", "Gun", "Yol Izni"].map(
-              (h) =>
-                new TableCell({
-                  children: [new Paragraph({ text: h })],
-                }),
-            ),
-          }),
-        ];
-        if (r.entries.length === 0) {
-          rows.push(
-            new TableRow({
-              children: [
-                new TableCell({
-                  columnSpan: 5,
-                  children: [new Paragraph("Bu yilda rapor/dis harici kayit yok.")],
-                }),
-              ],
+        if (r.kidemGruplari.length === 0) {
+          pageChildren.push(
+            new Paragraph({
+              text: "Bu personel icin secili yil sonuna kadar izin kullanilan kidem yili yok.",
             }),
           );
         } else {
-          r.entries.forEach((e) => {
-            rows.push(
+          r.kidemGruplari.forEach((g) => {
+            const rows = [
               new TableRow({
                 children: [
-                  new TableCell({ children: [new Paragraph(e.tur)] }),
-                  new TableCell({ children: [new Paragraph(isoToDdMmYyyy(e.basIso))] }),
-                  new TableCell({ children: [new Paragraph(isoToDdMmYyyy(e.bitIso))] }),
-                  new TableCell({ children: [new Paragraph(String(e.gun))] }),
-                  new TableCell({ children: [new Paragraph("-")] }),
+                  new TableCell({ children: [new Paragraph({ text: "Mazeret Turu" })] }),
+                  new TableCell({ children: [new Paragraph({ text: "Baslangic" })] }),
+                  new TableCell({ children: [new Paragraph({ text: "Son Gun" })] }),
+                  new TableCell({ children: [new Paragraph({ text: "Gun" })] }),
+                  new TableCell({ children: [new Paragraph({ text: "Yol Izni" })] }),
                 ],
               }),
+            ];
+            g.entries.forEach((e) => {
+              rows.push(
+                new TableRow({
+                  children: [
+                    new TableCell({ children: [new Paragraph(e.tur)] }),
+                    new TableCell({ children: [new Paragraph(isoToDdMmYyyy(e.basIso))] }),
+                    new TableCell({ children: [new Paragraph(isoToDdMmYyyy(e.bitIso))] }),
+                    new TableCell({ children: [new Paragraph(String(e.gun))] }),
+                    new TableCell({ children: [new Paragraph("-")] }),
+                  ],
+                }),
+              );
+            });
+            pageChildren.push(
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `Personel: ${r.personel.ad}   `, bold: true }),
+                  new TextRun({ text: `Iktisap Tarihi: ${isoToDdMmYyyy(r.iktisapIso)}   ` }),
+                  new TextRun({ text: `Rapor Yili: ${r.yil}   ` }),
+                  new TextRun({ text: `Toplam Gun: ${g.toplamGun}` }),
+                ],
+              }),
+              new Paragraph({
+                children: [
+                  new TextRun({
+                    text: `${g.kidemYili}. kidem yili (${isoToDdMmYyyy(g.donemBasIso)} - ${isoToDdMmYyyy(g.donemSonIso)}) | Toplam: ${g.toplamGun} gun`,
+                    bold: true,
+                  }),
+                ],
+              }),
+              new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                rows,
+              }),
+              new Paragraph({ text: "" }),
+              new Paragraph({ children: [new TextRun({ text: "Imza", bold: true })] }),
+              new Table({
+                width: { size: 100, type: WidthType.PERCENTAGE },
+                rows: [
+                  new TableRow({
+                    children: [
+                      new TableCell({
+                        children: [new Paragraph(" ")],
+                        borders: {
+                          top: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
+                          bottom: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
+                          left: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
+                          right: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
+                        },
+                      }),
+                    ],
+                    height: { value: 2200, rule: "atLeast" },
+                  }),
+                ],
+              }),
+              new Paragraph({ text: "" }),
             );
           });
         }
-        pageChildren.push(
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows,
-          }),
-          new Paragraph({ text: "" }),
-          new Paragraph({ children: [new TextRun({ text: "Imza", bold: true })] }),
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({
-                    children: [new Paragraph(" ")],
-                    borders: {
-                      top: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
-                      bottom: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
-                      left: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
-                      right: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
-                    },
-                  }),
-                ],
-                height: { value: 2200, rule: "atLeast" },
-              }),
-            ],
-          }),
-        );
         return { children: pageChildren };
       });
 
@@ -1646,13 +1688,14 @@ export default function Home() {
           );
         }
         const satirBakiye = hak - kullanilan;
-        ozetSatirlari.push([formatKisaTr(bas), hak, kullanilan, satirBakiye]);
+        const donemEtiketi = `${formatKisaTr(bas)} - ${formatKisaTr(kullanilanDonemSon)} - ${n}. Kidem yili`;
+        ozetSatirlari.push([donemEtiketi, hak, kullanilan, satirBakiye]);
         toplamHak += hak;
         toplamKullanilan += kullanilan;
         toplamBakiye += satirBakiye;
       }
 
-      const ozetBaslik = ["Yillar", "Hakedilen", "Kullanilan", "Sonraki Yila Devir"];
+      const ozetBaslik = ["Donem", "Hakedilen", "Kullanilan", "Sonraki Yila Devir"];
       const ozetVeri = [
         ["Devir", "", devirKullanilan, -devirKullanilan],
         ...ozetSatirlari.map((r) => [r[0], r[1], r[2], r[3]]),
@@ -1729,7 +1772,8 @@ export default function Home() {
         );
       }
       const satirBakiye = hak - kullanilan;
-      rows.push({ bas: isoToDdMmYyyy(basIso), hak, kullanilan, devir: satirBakiye });
+      const donemEtiketi = `${isoToDdMmYyyy(basIso)} - ${isoToDdMmYyyy(donemSonIso)} - ${n}. Kidem yili`;
+      rows.push({ bas: donemEtiketi, hak, kullanilan, devir: satirBakiye });
       toplamHak += hak;
       toplamKullanilan += kullanilan;
       toplamBakiye += satirBakiye;
@@ -2431,7 +2475,7 @@ export default function Home() {
             <div>
               <h2 className="text-lg font-semibold">Yillik Izin Formu</h2>
               <p className="text-sm text-slate-500">
-                Aktif personellerin secilen yildaki yillik izin kullanim ozet formu ve imza alani.
+                Aktif personellerin izin kalemlerini kidem yillarina gore gruplar.
               </p>
             </div>
             <div className="flex flex-wrap items-end gap-2">
@@ -2476,47 +2520,53 @@ export default function Home() {
                     <div className="mb-2 text-center text-sm font-semibold text-slate-900">
                       YILLIK UCRETLI IZIN FORMU - {r.yil}
                     </div>
-                    <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
-                      <div><span className="font-semibold">Personel:</span> {r.personel.ad}</div>
-                      <div><span className="font-semibold">Iktisap Tarihi:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
-                      <div><span className="font-semibold">Toplam Gun:</span> {r.toplamGun}</div>
-                    </div>
-
-                    <table className="w-full border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-50">
-                          <th className="border border-slate-200 px-2 py-1 text-left">Mazeret Turu</th>
-                          <th className="border border-slate-200 px-2 py-1 text-center">Baslangic</th>
-                          <th className="border border-slate-200 px-2 py-1 text-center">Son Gun</th>
-                          <th className="border border-slate-200 px-2 py-1 text-center">Gun</th>
-                          <th className="border border-slate-200 px-2 py-1 text-center">Yol Izni</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {r.entries.length === 0 ? (
-                          <tr>
-                            <td className="border border-slate-200 px-2 py-2 text-center text-slate-500" colSpan={5}>
-                              Bu yilda rapor/dis harici kayit yok.
-                            </td>
-                          </tr>
-                        ) : (
-                          r.entries.map((e) => (
-                            <tr key={e.id}>
-                              <td className="border border-slate-200 px-2 py-1">{e.tur}</td>
-                              <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.basIso)}</td>
-                              <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.bitIso)}</td>
-                              <td className="border border-slate-200 px-2 py-1 text-center">{e.gun}</td>
-                              <td className="border border-slate-200 px-2 py-1 text-center">-</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-
-                    <div className="mt-4 text-xs text-slate-700">
-                      <div className="mb-1 font-semibold">Imza</div>
-                      <div className="h-24 rounded-md border border-slate-300" />
-                    </div>
+                    {r.kidemGruplari.length === 0 ? (
+                      <div className="rounded border border-slate-200 px-3 py-2 text-xs text-slate-500">
+                        Bu personel icin secili yil sonuna kadar izin kullanilan kidem yili yok.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {r.kidemGruplari.map((g) => (
+                          <div key={`${r.personel.id}-grp-${g.kidemYili}`} className="rounded border border-slate-200 p-2">
+                            <div className="mb-2 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+                              <div><span className="font-semibold">Personel:</span> {r.personel.ad}</div>
+                              <div><span className="font-semibold">Iktisap Tarihi:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
+                              <div><span className="font-semibold">Rapor Yili:</span> {r.yil}</div>
+                              <div><span className="font-semibold">Toplam Gun:</span> {g.toplamGun}</div>
+                            </div>
+                            <div className="mb-2 rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-800">
+                              {g.kidemYili}. kidem yili ({isoToDdMmYyyy(g.donemBasIso)} - {isoToDdMmYyyy(g.donemSonIso)}) | Toplam: {g.toplamGun} gun
+                            </div>
+                            <table className="w-full border-collapse text-xs">
+                              <thead>
+                                <tr className="bg-slate-50">
+                                  <th className="border border-slate-200 px-2 py-1 text-left">Mazeret Turu</th>
+                                  <th className="border border-slate-200 px-2 py-1 text-center">Baslangic</th>
+                                  <th className="border border-slate-200 px-2 py-1 text-center">Son Gun</th>
+                                  <th className="border border-slate-200 px-2 py-1 text-center">Gun</th>
+                                  <th className="border border-slate-200 px-2 py-1 text-center">Yol Izni</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {g.entries.map((e) => (
+                                  <tr key={e.id}>
+                                    <td className="border border-slate-200 px-2 py-1">{e.tur}</td>
+                                    <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.basIso)}</td>
+                                    <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.bitIso)}</td>
+                                    <td className="border border-slate-200 px-2 py-1 text-center">{e.gun}</td>
+                                    <td className="border border-slate-200 px-2 py-1 text-center">-</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div className="mt-3 text-xs text-slate-700">
+                              <div className="mb-1 font-semibold">Imza</div>
+                              <div className="h-24 rounded-md border border-slate-300" />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2622,7 +2672,7 @@ export default function Home() {
               <table className="min-w-[360px] border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50">
-                    <th className="border border-slate-200 px-2 py-1 text-left font-semibold">Yillar</th>
+                    <th className="border border-slate-200 px-2 py-1 text-left font-semibold">Donem</th>
                     <th className="border border-slate-200 px-2 py-1 text-right font-semibold">Hakedilen</th>
                     <th className="border border-slate-200 px-2 py-1 text-right font-semibold">Kullanilan</th>
                     <th className="border border-slate-200 px-2 py-1 text-right font-semibold">Sonraki Yila Devir</th>
