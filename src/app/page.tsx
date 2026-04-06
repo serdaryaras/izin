@@ -245,34 +245,48 @@ function endOfCalendarYearIso(y: number): string {
   return `${y}-12-31`;
 }
 
-/** Belirli bir tarihteki kidem ve yasa gore yillik izin hakki (gun) */
-function calculateAnnualEntitlementAsOf(personel: Personel, asOf: Date): number {
-  const kidem = diffYears(personel.ise_giris, asOf);
-  const yas = diffYears(personel.dogum_tarihi, asOf);
+/** Kidem/yas kurallarina gore yillik hak (gun) */
+function annualEntitlementByRules(kidemYil: number, yas: number): number {
   let hak = 14;
-  if (kidem >= 5 && kidem < 15) hak = 20;
-  if (kidem >= 15) hak = 26;
+  if (kidemYil >= 5 && kidemYil < 15) hak = 20;
+  if (kidemYil >= 15) hak = 26;
   if (yas < 18 || yas >= 50) hak = Math.max(hak, 20);
   return hak;
 }
 
 /**
+ * Yillik hak, ancak en az 1 tam yil tamamlandiginda dogar.
+ * grantDate: hakkin dogdugu tarih (ise giris yil donumu).
+ */
+function calculateAnnualEntitlementAtGrantDate(personel: Personel, grantDate: Date): number {
+  const kidem = diffYears(personel.ise_giris, grantDate);
+  if (kidem < 1) return 0;
+  const yas = diffYears(personel.dogum_tarihi, grantDate);
+  return annualEntitlementByRules(kidem, yas);
+}
+
+/**
  * İse giristen, secilen takvim yilinin sonuna kadar (veya ayrilis yilina kadar)
- * her tam takvim yili icin, yil sonundaki kidem/yas ile haklari toplar (kumulatif hak).
+ * tamamlanan her kidem yil donumunde olusan haklari toplar (kumulatif hak).
  */
 function cumulativeAnnualEntitlementThroughYear(
   personel: Personel,
   throughCalendarYear: number,
 ): number {
-  const hireY = yearFromIso(personel.ise_giris);
-  const leaveY = personel.ayrilis_tarihi ? yearFromIso(personel.ayrilis_tarihi) : null;
-  const lastAccrualYear = leaveY == null ? throughCalendarYear : Math.min(throughCalendarYear, leaveY);
-  if (lastAccrualYear < hireY || throughCalendarYear < hireY) return 0;
-
+  const hire = parseISODate(personel.ise_giris);
+  const endOfYear = parseISODate(endOfCalendarYearIso(throughCalendarYear));
+  const leaveDate = personel.ayrilis_tarihi ? parseISODate(personel.ayrilis_tarihi) : null;
+  const cutoff =
+    leaveDate && leaveDate.getTime() < endOfYear.getTime() ? leaveDate : endOfYear;
   let sum = 0;
-  for (let y = hireY; y <= lastAccrualYear; y++) {
-    const endOfY = parseISODate(endOfCalendarYearIso(y));
-    sum += calculateAnnualEntitlementAsOf(personel, endOfY);
+  for (let n = 1; n <= 80; n++) {
+    const grantDate = new Date(
+      hire.getFullYear() + n,
+      hire.getMonth(),
+      hire.getDate(),
+    );
+    if (grantDate.getTime() > cutoff.getTime()) break;
+    sum += calculateAnnualEntitlementAtGrantDate(personel, grantDate);
   }
   return sum;
 }
@@ -807,9 +821,9 @@ export default function Home() {
       let kidemGecerli = false;
       if (kidBounds) {
         kidemGecerli = true;
-        kidemHakEdilen = calculateAnnualEntitlementAsOf(
+        kidemHakEdilen = calculateAnnualEntitlementAtGrantDate(
           personel,
-          parseISODate(kidBounds.son),
+          parseISODate(kidBounds.bas),
         );
         kidemKullanilan = annualLeaveUsedInIsoRange(
           personel,
@@ -1300,9 +1314,15 @@ export default function Home() {
     "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
   const labelClass =
     "mb-1 flex h-8 items-end text-xs font-semibold uppercase tracking-wide text-slate-600";
+  const mazeretFieldClass =
+    "h-9 w-full rounded-md border border-slate-300 bg-white px-2.5 text-xs shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+  const mazeretLabelClass =
+    "mb-0.5 flex h-6 items-end text-[11px] font-semibold uppercase tracking-wide text-slate-600";
   /** Dar ekranda sarilabilir; genis ekranda tek sira (xl+). Sabit minmax yerine esnek sutun. */
   const formGridClass =
     "grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 items-start [&>*]:min-w-0";
+  const mazeretFormGridClass =
+    "grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 items-start [&>*]:min-w-0";
 
   return (
     <div className="min-h-screen bg-slate-100 p-4 md:p-8">
@@ -1319,15 +1339,15 @@ export default function Home() {
         {loading && <div className="rounded-lg border bg-white p-3">Yukleniyor...</div>}
 
         <section
-          className={`min-w-0 rounded-xl border border-slate-200/90 p-5 shadow-sm transition-[background-color] duration-300 ease-out ${mazeretFormArkaplan[izinForm.izin_tipi || "yillik"]}`}
+          className={`min-w-0 rounded-xl border border-slate-200/90 p-4 shadow-sm transition-[background-color] duration-300 ease-out ${mazeretFormArkaplan[izinForm.izin_tipi || "yillik"]}`}
         >
-          <h2 className="mb-4 text-lg font-semibold">Mazeret Giris</h2>
+          <h2 className="mb-2 text-base font-semibold">Mazeret Giris</h2>
           <form onSubmit={handleIzinInsert} className="block">
-            <div className={formGridClass}>
+            <div className={mazeretFormGridClass}>
             <div className="relative z-20" ref={mazeretPersonelKutuRef}>
-              <label className={labelClass}>Personel (ada gore ara)</label>
+              <label className={mazeretLabelClass}>Personel (ada gore ara)</label>
               <input
-                className={fieldClass}
+                className={mazeretFieldClass}
                 placeholder="Isim yazin, liste suzulur..."
                 autoComplete="off"
                 value={mazeretPersonelArama}
@@ -1375,9 +1395,9 @@ export default function Home() {
             </div>
 
             <div className="relative z-20" ref={mazeretTurKutuRef}>
-              <label className={labelClass}>Mazeret Turu (ada gore ara)</label>
+              <label className={mazeretLabelClass}>Mazeret Turu (ada gore ara)</label>
               <input
-                className={fieldClass}
+                className={mazeretFieldClass}
                 placeholder="Tur adi yazin, liste suzulur..."
                 autoComplete="off"
                 value={mazeretTurArama}
@@ -1425,9 +1445,9 @@ export default function Home() {
             </div>
 
             <div>
-              <label className={labelClass}>Baslangic (gg.aa.yyyy)</label>
+              <label className={mazeretLabelClass}>Baslangic (gg.aa.yyyy)</label>
               <input
-                className={fieldClass}
+                className={mazeretFieldClass}
                 inputMode="numeric"
                 placeholder="gg.aa.yyyy veya g-a-yyyy"
                 autoComplete="off"
@@ -1442,9 +1462,9 @@ export default function Home() {
               />
             </div>
             <div>
-              <label className={labelClass}>Bitis (gg.aa.yyyy)</label>
+              <label className={mazeretLabelClass}>Bitis (gg.aa.yyyy)</label>
               <input
-                className={fieldClass}
+                className={mazeretFieldClass}
                 inputMode="numeric"
                 placeholder="gg.aa.yyyy veya g-a-yyyy"
                 autoComplete="off"
@@ -1459,29 +1479,29 @@ export default function Home() {
               />
             </div>
             <div className="min-w-0 sm:col-span-2 lg:col-span-3 xl:col-span-2">
-              <label className={labelClass}>Aciklama (Opsiyonel)</label>
+              <label className={mazeretLabelClass}>Aciklama (Opsiyonel)</label>
               <input
-                className={fieldClass}
+                className={mazeretFieldClass}
                 value={izinForm.aciklama}
                 onChange={(e) => setIzinForm((prev) => ({ ...prev, aciklama: e.target.value }))}
                 placeholder="Orn: Hastane sevki, saha gorevi, vb."
               />
             </div>
 
-            <div className="col-span-full mt-4 min-w-0 rounded-xl border border-slate-200 bg-white/90 p-4 shadow-inner">
-              <div className="mb-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div className="col-span-full mt-2 min-w-0 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner">
+              <div className="mb-2 flex min-w-0 flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-800">Yillik takvimden tarih secimi</h3>
-                  <p className="text-xs leading-relaxed text-slate-600">
+                  <h3 className="text-xs font-semibold text-slate-800">Yillik takvimden tarih secimi</h3>
+                  <p className="text-[11px] leading-relaxed text-slate-600">
                     Ilk tik: tek gun (baslangic = bitis). ikinci tik: aralik. Ucuncu tik yeni araliga baslar.
                     Secilen tur rengi yeni giris araliginda kullanilir. Personel seciliyse mevcut kayitlar kisaltma ile
                     gosterilir.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-xs font-semibold text-slate-600">Yil</label>
+                  <label className="text-[11px] font-semibold text-slate-600">Yil</label>
                   <select
-                    className={`${fieldClass} w-auto min-w-[5.5rem]`}
+                    className={`${mazeretFieldClass} h-8 w-auto min-w-[5.5rem]`}
                     value={mazeretTakvimYil}
                     onChange={(e) => {
                       setMazeretTakvimYil(Number(e.target.value));
@@ -1496,7 +1516,7 @@ export default function Home() {
                   </select>
                   <button
                     type="button"
-                    className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                    className="rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
                     onClick={() => {
                       setMazeretTakvimBirinciGun(null);
                       setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
@@ -1507,20 +1527,20 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {ayIsimleri.map((ayAd, monthIdx) => {
                   const haftalar = monthWeekGrid(mazeretTakvimYil, monthIdx);
                   const gunBaslik = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const;
                   const secTip = (izinForm.izin_tipi || "yillik") as IzinKod;
                   return (
-                    <div key={ayAd} className="min-w-0 overflow-hidden rounded-lg border border-slate-200">
-                      <div className="bg-blue-600 px-2 py-1 text-center text-xs font-semibold text-white">
+                    <div key={ayAd} className="min-w-0 overflow-hidden rounded-md border border-slate-200">
+                      <div className="bg-blue-600 px-1.5 py-0.5 text-center text-[11px] font-semibold text-white">
                         {ayAd} {mazeretTakvimYil}
                       </div>
-                      <table className="w-full table-fixed border-collapse text-center text-[10px]">
+                      <table className="w-full table-fixed border-collapse text-center text-[9px]">
                         <thead>
                           <tr className="border-b border-slate-200 bg-slate-50">
-                            <th className="w-7 border-r border-slate-200 py-0.5 font-semibold text-slate-600">
+                            <th className="w-6 border-r border-slate-200 py-0.5 font-semibold text-slate-600">
                               Wk
                             </th>
                             {gunBaslik.map((g) => (
@@ -1538,7 +1558,7 @@ export default function Home() {
                         <tbody>
                           {haftalar.map((satir) => (
                             <tr key={`${satir.weekNo}-${monthIdx}-${toISODate(satir.days[0])}`}>
-                              <td className="border border-slate-100 bg-slate-50/80 py-0.5 text-[9px] font-medium text-slate-500">
+                              <td className="border border-slate-100 bg-slate-50/80 py-0.5 text-[8px] font-medium text-slate-500">
                                 {satir.weekNo}
                               </td>
                               {satir.days.map((gunTarih) => {
@@ -1581,7 +1601,7 @@ export default function Home() {
                                       disabled={!buAy}
                                       onClick={() => buAy && mazeretTakvimGunTik(iso)}
                                       className={[
-                                        "flex h-6 w-full min-w-0 items-center justify-center rounded-sm leading-none",
+                                        "flex h-5 w-full min-w-0 items-center justify-center rounded-sm leading-none",
                                         zemini,
                                         buAy ? "cursor-pointer hover:brightness-95" : "cursor-default opacity-60",
                                         ciroNokta ? "ring-2 ring-amber-500 ring-offset-1" : "",
