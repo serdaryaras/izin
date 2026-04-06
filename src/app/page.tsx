@@ -389,6 +389,47 @@ function isHalfDay(dayIso: string, tur?: string): boolean {
   return tur === "arefe_yarim" || dayIso.endsWith("-10-28");
 }
 
+/** Pazartesi = 0 ... Pazar = 6 */
+function mondayBasedDayIndex(d: Date): number {
+  return (d.getDay() + 6) % 7;
+}
+
+/** ISO 8601 hafta numarasi (Pazartesi baslar) */
+function isoWeekFromDate(d: Date): number {
+  const tmp = new Date(d.getTime());
+  tmp.setHours(0, 0, 0, 0);
+  tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7));
+  const week1 = new Date(tmp.getFullYear(), 0, 4);
+  return (
+    1 +
+    Math.round(
+      ((tmp.getTime() - week1.getTime()) / 86400000 -
+        3 +
+        ((week1.getDay() + 6) % 7)) /
+        7,
+    )
+  );
+}
+
+/** Ay grid'i: en fazla 6 satir (padding dahil) */
+function monthWeekGrid(year: number, monthIndex: number): { weekNo: number; days: Date[] }[] {
+  const first = new Date(year, monthIndex, 1);
+  const last = new Date(year, monthIndex + 1, 0);
+  const pad = mondayBasedDayIndex(first);
+  const d = new Date(year, monthIndex, 1 - pad);
+  const rows: { weekNo: number; days: Date[] }[] = [];
+  for (let r = 0; r < 6; r++) {
+    const days: Date[] = [];
+    for (let i = 0; i < 7; i++) {
+      days.push(new Date(d));
+      d.setDate(d.getDate() + 1);
+    }
+    rows.push({ weekNo: isoWeekFromDate(days[0]), days });
+    if (days[0] > last) break;
+  }
+  return rows;
+}
+
 function personelAktifMi(p: Personel): boolean {
   const a = p.ayrilis_tarihi;
   return a == null || String(a).trim() === "";
@@ -480,6 +521,13 @@ export default function Home() {
     bitis: "",
     aciklama: "",
   });
+  /** Yillik mazeret takviminde gosterilen yil */
+  const [mazeretTakvimYil, setMazeretTakvimYil] = useState<number>(() => bugun.getFullYear());
+  /**
+   * Aralik secimi: ilk tikta yer lestirilir; ikinci tikta aralik tamamlanir.
+   * null = yeni secime hazir.
+   */
+  const [mazeretTakvimBirinciGun, setMazeretTakvimBirinciGun] = useState<string | null>(null);
   const [mazeretPersonelArama, setMazeretPersonelArama] = useState("");
   const [mazeretPersonelListeAcik, setMazeretPersonelListeAcik] = useState(false);
   const mazeretPersonelKutuRef = useRef<HTMLDivElement>(null);
@@ -796,6 +844,46 @@ export default function Home() {
       if (iz.personel_id !== personelId) return false;
       return dayIso >= iz.baslangic && dayIso <= iz.bitis;
     });
+  }
+
+  const izinFormSecimAraligi = useMemo(() => {
+    const a = ddMmYyyyToIso(izinForm.baslangic);
+    const b = ddMmYyyyToIso(izinForm.bitis);
+    if (!a || !b || a > b) return null;
+    return { bas: a, bit: b };
+  }, [izinForm.baslangic, izinForm.bitis]);
+
+  const mazeretTakvimYilSecenekleri = useMemo(() => {
+    const c = bugun.getFullYear();
+    const lo = Math.min(c - 3, mazeretTakvimYil);
+    const hi = Math.max(c + 7, mazeretTakvimYil);
+    return Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+  }, [mazeretTakvimYil]);
+
+  function mazeretTakvimGunTik(iso: string) {
+    if (!mazeretTakvimBirinciGun) {
+      setMazeretTakvimBirinciGun(iso);
+      const tr = isoToDdMmYyyy(iso);
+      setIzinForm((prev) => ({ ...prev, baslangic: tr, bitis: tr }));
+      return;
+    }
+    const u = mazeretTakvimBirinciGun;
+    setMazeretTakvimBirinciGun(null);
+    const a = u < iso ? u : iso;
+    const b = u < iso ? iso : u;
+    setIzinForm((prev) => ({
+      ...prev,
+      baslangic: isoToDdMmYyyy(a),
+      bitis: isoToDdMmYyyy(b),
+    }));
+  }
+
+  function mazeretTakvimMevcutIzin(dayIso: string): Izin | undefined {
+    const pid = izinForm.personel_id;
+    if (!pid) return undefined;
+    return izinler.find(
+      (iz) => iz.personel_id === pid && dayIso >= iz.baslangic && dayIso <= iz.bitis,
+    );
   }
 
   async function handlePersonelInsert(e: FormEvent<HTMLFormElement>) {
@@ -1379,6 +1467,150 @@ export default function Home() {
                 placeholder="Orn: Hastane sevki, saha gorevi, vb."
               />
             </div>
+
+            <div className="col-span-full mt-4 min-w-0 rounded-xl border border-slate-200 bg-white/90 p-4 shadow-inner">
+              <div className="mb-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">Yillik takvimden tarih secimi</h3>
+                  <p className="text-xs leading-relaxed text-slate-600">
+                    Ilk tik: tek gun (baslangic = bitis). ikinci tik: aralik. Ucuncu tik yeni araliga baslar.
+                    Secilen tur rengi yeni giris araliginda kullanilir. Personel seciliyse mevcut kayitlar kisaltma ile
+                    gosterilir.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-xs font-semibold text-slate-600">Yil</label>
+                  <select
+                    className={`${fieldClass} w-auto min-w-[5.5rem]`}
+                    value={mazeretTakvimYil}
+                    onChange={(e) => {
+                      setMazeretTakvimYil(Number(e.target.value));
+                      setMazeretTakvimBirinciGun(null);
+                    }}
+                  >
+                    {mazeretTakvimYilSecenekleri.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                    onClick={() => {
+                      setMazeretTakvimBirinciGun(null);
+                      setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
+                    }}
+                  >
+                    Tarihleri temizle
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                {ayIsimleri.map((ayAd, monthIdx) => {
+                  const haftalar = monthWeekGrid(mazeretTakvimYil, monthIdx);
+                  const gunBaslik = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const;
+                  const secTip = (izinForm.izin_tipi || "yillik") as IzinKod;
+                  return (
+                    <div key={ayAd} className="min-w-0 overflow-hidden rounded-lg border border-slate-200">
+                      <div className="bg-blue-600 px-2 py-1 text-center text-xs font-semibold text-white">
+                        {ayAd} {mazeretTakvimYil}
+                      </div>
+                      <table className="w-full table-fixed border-collapse text-center text-[10px]">
+                        <thead>
+                          <tr className="border-b border-slate-200 bg-slate-50">
+                            <th className="w-7 border-r border-slate-200 py-0.5 font-semibold text-slate-600">
+                              Wk
+                            </th>
+                            {gunBaslik.map((g) => (
+                              <th
+                                key={g}
+                                className={`py-0.5 font-semibold ${
+                                  g === "Sa" || g === "Su" ? "text-sky-700" : "text-slate-600"
+                                }`}
+                              >
+                                {g}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {haftalar.map((satir) => (
+                            <tr key={`${satir.weekNo}-${monthIdx}-${toISODate(satir.days[0])}`}>
+                              <td className="border border-slate-100 bg-slate-50/80 py-0.5 text-[9px] font-medium text-slate-500">
+                                {satir.weekNo}
+                              </td>
+                              {satir.days.map((gunTarih) => {
+                                const iso = toISODate(gunTarih);
+                                const buAy = gunTarih.getMonth() === monthIdx;
+                                const haftaSonu =
+                                  gunTarih.getDay() === 0 || gunTarih.getDay() === 6;
+                                const tur = tatilMap.get(iso);
+                                const resmi = tur === "resmi_tatil";
+                                const yarim = isHalfDay(iso, tur);
+                                const secimde =
+                                  izinFormSecimAraligi != null &&
+                                  iso >= izinFormSecimAraligi.bas &&
+                                  iso <= izinFormSecimAraligi.bit;
+                                const mevcut = mazeretTakvimMevcutIzin(iso);
+                                const ciroNokta = mazeretTakvimBirinciGun === iso;
+
+                                let zemini: string;
+                                if (secimde) {
+                                  zemini = izinRenk[secTip];
+                                } else if (!buAy) {
+                                  zemini = "bg-slate-50/50 text-slate-300";
+                                } else if (resmi) {
+                                  zemini = "bg-slate-200 text-slate-800";
+                                } else if (yarim) {
+                                  zemini = "bg-amber-50 text-slate-800";
+                                } else if (haftaSonu) {
+                                  zemini = "bg-sky-50 text-slate-800";
+                                } else {
+                                  zemini = "bg-white text-slate-800";
+                                }
+
+                                return (
+                                  <td key={iso} className="border border-slate-100 p-0 align-middle">
+                                    <button
+                                      type="button"
+                                      disabled={!buAy}
+                                      onClick={() => buAy && mazeretTakvimGunTik(iso)}
+                                      className={[
+                                        "relative flex h-7 w-full min-w-0 items-center justify-center rounded-sm leading-none",
+                                        zemini,
+                                        buAy ? "cursor-pointer hover:brightness-95" : "cursor-default opacity-60",
+                                        ciroNokta ? "ring-2 ring-amber-500 ring-offset-1" : "",
+                                      ].join(" ")}
+                                      title={
+                                        buAy
+                                          ? `${isoToDdMmYyyy(iso)} — tikla`
+                                          : ""
+                                      }
+                                    >
+                                      <span className={buAy ? "font-medium" : ""}>{gunTarih.getDate()}</span>
+                                      {mevcut && buAy && !secimde ? (
+                                        <span
+                                          className={`absolute bottom-0 left-0 right-0 truncate px-px text-[7px] font-bold leading-none ${izinRenk[mevcut.izin_tipi]}`}
+                                        >
+                                          {izinKisaltma[mevcut.izin_tipi]}
+                                        </span>
+                                      ) : null}
+                                    </button>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             </div>
             <div className="mt-4 flex min-h-[2.5rem] flex-wrap items-center gap-4">
               <button
