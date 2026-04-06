@@ -874,38 +874,8 @@ export default function Home() {
       takvimGorunum === "havuz_tumu"
         ? takvimPersonelHavuzu
         : takvimPersonelHavuzu.filter((x) => takvimSeciliIds.includes(x.id));
-    const refDate = endOfMonth(year, month);
-    return filtered.map((personel) => {
-      const toplamHakedilen = cumulativeAnnualEntitlementThroughDate(personel, refDate);
-      const yillikKullanilanKumulatif = cumulativeAnnualUsedThroughDate(
-        personel,
-        refDate,
-        izinler,
-        tatilMap,
-      );
-      const kalan = toplamHakedilen - yillikKullanilanKumulatif;
-      const buSeneHak = (() => {
-        const hire = parseISODate(personel.ise_giris);
-        const grant = new Date(year, hire.getMonth(), hire.getDate());
-        if (grant.getTime() > refDate.getTime()) return 0;
-        return calculateAnnualEntitlementAtGrantDate(personel, grant);
-      })();
-
-      return {
-        personel,
-        buSeneHak,
-        kalan,
-      };
-    });
-  }, [
-    izinler,
-    takvimPersonelHavuzu,
-    takvimGorunum,
-    takvimSeciliIds,
-    tatilMap,
-    year,
-    month,
-  ]);
+    return filtered.map((personel) => ({ personel }));
+  }, [takvimPersonelHavuzu, takvimGorunum, takvimSeciliIds]);
 
   function izinOfDay(personelId: string, dayIso: string): Izin | undefined {
     const p = personeller.find((x) => x.id === personelId);
@@ -1514,16 +1484,15 @@ export default function Home() {
       const sections = yillikFormSayfalari.map((r) => {
         const pageChildren: Array<
           InstanceType<typeof Paragraph> | InstanceType<typeof Table>
-        > = [
-          new Paragraph({
-            text: `YILLIK UCRETLI IZIN FORMU - ${r.yil}`,
-            heading: HeadingLevel.HEADING_2,
-            alignment: AlignmentType.CENTER,
-          }),
-        ];
+        > = [];
 
         if (r.kidemGruplari.length === 0) {
           pageChildren.push(
+            new Paragraph({
+              text: `YILLIK UCRETLI IZIN FORMU - ${r.yil}`,
+              heading: HeadingLevel.HEADING_2,
+              alignment: AlignmentType.CENTER,
+            }),
             new Paragraph({
               text: "Bu personel icin secili yil sonuna kadar izin kullanilan kidem yili yok.",
             }),
@@ -1556,8 +1525,13 @@ export default function Home() {
             });
             pageChildren.push(
               new Paragraph({
+                text: `YILLIK UCRETLI IZIN FORMU - ${r.yil}`,
+                heading: HeadingLevel.HEADING_2,
+                alignment: AlignmentType.CENTER,
+              }),
+              new Paragraph({
                 children: [
-                  new TextRun({ text: `Personel: ${r.personel.ad}   `, bold: true }),
+                  new TextRun({ text: `Çalışan: ${r.personel.ad}   `, bold: true }),
                   new TextRun({ text: `Iktisap Tarihi: ${isoToDdMmYyyy(r.iktisapIso)}   ` }),
                   new TextRun({ text: `Rapor Yili: ${r.yil}   ` }),
                   new TextRun({ text: `Toplam Gun: ${g.toplamGun}` }),
@@ -2194,7 +2168,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="order-2 min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="order-1 min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Aylik Takvim</h2>
@@ -2368,15 +2342,15 @@ export default function Home() {
             <div className="w-full max-w-full overflow-x-auto" data-takvim-table-wrap>
             <table className="w-full max-w-full table-fixed border-collapse text-sm">
               <colgroup>
-                <col style={{ width: "13rem" }} />
+                <col style={{ width: "10rem" }} />
                 {daysInMonth.map((d) => (
                   <col key={d} />
                 ))}
               </colgroup>
               <thead>
                 <tr>
-                  <th className="sticky left-0 z-10 border bg-white p-2 text-left shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">
-                    Personel
+                  <th className="sticky left-0 z-10 border bg-white px-1.5 py-1 text-left text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                    Çalışan
                   </th>
                   {daysInMonth.map((d) => {
                     const date = parseISODate(d);
@@ -2416,15 +2390,9 @@ export default function Home() {
                 )}
                 {personelRows.map((row) => (
                   <tr key={row.personel.id}>
-                    <td className="sticky left-0 z-10 overflow-hidden border bg-white p-1.5 align-top shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">
-                      <div className="truncate text-sm font-medium" title={row.personel.ad}>
+                    <td className="sticky left-0 z-10 overflow-hidden border bg-white px-1.5 py-0.5 align-middle shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                      <div className="truncate text-xs font-medium leading-tight" title={row.personel.ad}>
                         {row.personel.ad}
-                      </div>
-                      <div className="text-[10px] leading-snug text-slate-500">
-                        Bu sene: {row.buSeneHak} | Kalan: {row.kalan}
-                      </div>
-                      <div className="text-[9px] leading-tight text-slate-400">
-                        Ise giris: {isoToDdMmYyyy(row.personel.ise_giris)}
                       </div>
                     </td>
                     {daysInMonth.map((d) => {
@@ -2448,11 +2416,11 @@ export default function Home() {
                       return (
                         <td
                           key={d}
-                          className={`h-10 min-w-0 border p-0 align-middle ${cellBg}`}
+                          className={`h-7 min-w-0 border p-0 align-middle ${cellBg}`}
                         >
                           {izin && !gizleIzin ? (
                             <span
-                              className={`box-border flex h-9 w-full min-w-0 items-center justify-center rounded-sm text-xs font-bold leading-none tracking-tight ${izinRenk[izin.izin_tipi]}`}
+                              className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm text-[10px] font-bold leading-none tracking-tight ${izinRenk[izin.izin_tipi]}`}
                               title={`${izin.izin_tipi} (${isoToDdMmYyyy(izin.baslangic)} - ${isoToDdMmYyyy(izin.bitis)})`}
                             >
                               {yarimGun ? `${izinKisaltma[izin.izin_tipi]}½` : izinKisaltma[izin.izin_tipi]}
@@ -2469,7 +2437,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="order-1 min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="order-2 min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Yillik Izin Formu</h2>
@@ -2503,7 +2471,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div ref={yillikFormRef} className="rounded-lg border border-slate-200 bg-white p-3" data-takvim-table-wrap>
+          <div ref={yillikFormRef} className="rounded-lg bg-white p-3" data-takvim-table-wrap>
             {yillikFormSayfalari.length === 0 ? (
               <div className="p-4 text-center text-sm text-slate-500">
                 Form olusturmak icin aktif personel bulunamadi.
@@ -2513,22 +2481,27 @@ export default function Home() {
                 {yillikFormSayfalari.map((r) => (
                   <div
                     key={r.personel.id}
-                    className="rounded-lg border border-slate-300 p-3"
+                    className="rounded-lg p-3"
                     style={{ breakAfter: "page", pageBreakAfter: "always" }}
                   >
-                    <div className="mb-2 text-center text-sm font-semibold text-slate-900">
-                      YILLIK UCRETLI IZIN FORMU - {r.yil}
-                    </div>
                     {r.kidemGruplari.length === 0 ? (
-                      <div className="rounded border border-slate-200 px-3 py-2 text-xs text-slate-500">
-                        Bu personel icin secili yil sonuna kadar izin kullanilan kidem yili yok.
-                      </div>
+                      <>
+                        <div className="mb-2 text-center text-sm font-semibold text-slate-900">
+                          YILLIK UCRETLI IZIN FORMU - {r.yil}
+                        </div>
+                        <div className="rounded border border-slate-200 px-3 py-2 text-xs text-slate-500">
+                          Bu personel icin secili yil sonuna kadar izin kullanilan kidem yili yok.
+                        </div>
+                      </>
                     ) : (
                       <div className="space-y-4">
                         {r.kidemGruplari.map((g) => (
                           <div key={`${r.personel.id}-grp-${g.kidemYili}`} className="rounded border border-slate-200 p-2">
+                            <div className="mb-2 text-center text-sm font-semibold text-slate-900">
+                              YILLIK UCRETLI IZIN FORMU - {r.yil}
+                            </div>
                             <div className="mb-2 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-                              <div><span className="font-semibold">Personel:</span> {r.personel.ad}</div>
+                              <div><span className="font-semibold">Çalışan:</span> {r.personel.ad}</div>
                               <div><span className="font-semibold">Iktisap Tarihi:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
                               <div><span className="font-semibold">Rapor Yili:</span> {r.yil}</div>
                               <div><span className="font-semibold">Toplam Gun:</span> {g.toplamGun}</div>
