@@ -1416,7 +1416,6 @@ export default function Home() {
           .filter(
             (i) =>
               i.personel_id === p.id &&
-              i.izin_tipi !== "rapor" &&
               i.izin_tipi !== "dis" &&
               i.bitis >= p.ise_giris &&
               i.baslangic <= raporSon,
@@ -2195,7 +2194,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="order-2 min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Aylik Takvim</h2>
@@ -2470,7 +2469,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="order-1 min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold">Yillik Izin Formu</h2>
