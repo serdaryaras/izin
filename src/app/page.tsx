@@ -174,8 +174,9 @@ function adKeyTr(s: string): string {
 function hucreyiTarihMetnine(v: unknown): string {
   if (v == null || v === "") return "";
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    // Excel Date hucrelerinde timezone kaymasini engellemek icin UTC parcalari kullanilir.
-    return `${v.getUTCDate()}.${v.getUTCMonth() + 1}.${v.getUTCFullYear()}`;
+    // XLSX cellDates ile gelen Date degerleri yerel gunde yorumlanir.
+    // UTC parcasi kullanmak +03 gibi timezone'larda bir gun geri kaydirabilir.
+    return `${v.getDate()}.${v.getMonth() + 1}.${v.getFullYear()}`;
   }
   if (typeof v === "number" && Number.isFinite(v)) {
     const ms = Math.round((v - 25569) * 86400 * 1000);
