@@ -550,6 +550,7 @@ export default function Home() {
   const [takvimSeciliIds, setTakvimSeciliIds] = useState<string[]>([]);
   const [month, setMonth] = useState<number>(bugun.getMonth());
   const [year, setYear] = useState<number>(bugun.getFullYear());
+  const [yillikFormYil, setYillikFormYil] = useState<number>(bugun.getFullYear());
 
   const [personelForm, setPersonelForm] = useState<PersonelForm>({
     ad: "",
@@ -591,6 +592,8 @@ export default function Home() {
   } | null>(null);
   const takvimExportRef = useRef<HTMLDivElement>(null);
   const [takvimDisariAktariliyor, setTakvimDisariAktariliyor] = useState(false);
+  const yillikFormRef = useRef<HTMLDivElement>(null);
+  const [yillikFormDisariAktariliyor, setYillikFormDisariAktariliyor] = useState(false);
 
   async function loadData() {
     if (!hasSupabaseEnv) {
@@ -1273,6 +1276,7 @@ export default function Home() {
   ];
 
   const takvimDosyaAdiKoku = `${ayIsimleri[month]}_${year}`.replace(/\s+/g, "_");
+  const yillikFormDosyaAdiKoku = `yillik_izin_formu_${yillikFormYil}`;
 
   async function takvimIndirPng() {
     const el = takvimExportRef.current;
@@ -1301,6 +1305,94 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "PDF olusturulamadi.");
     } finally {
       setTakvimDisariAktariliyor(false);
+    }
+  }
+
+  const yillikFormSayfalari = useMemo(() => {
+    const yilBas = `${yillikFormYil}-01-01`;
+    const yilSon = `${yillikFormYil}-12-31`;
+    return personeller
+      .filter(personelAktifMi)
+      .slice()
+      .sort((a, b) => a.ad.localeCompare(b.ad, "tr"))
+      .map((p) => {
+        const kayitlar = izinler
+          .filter(
+            (i) =>
+              i.personel_id === p.id &&
+              i.izin_tipi !== "rapor" &&
+              i.izin_tipi !== "dis" &&
+              i.bitis >= p.ise_giris &&
+              i.bitis >= yilBas &&
+              i.baslangic <= yilSon,
+          )
+          .slice()
+          .sort((a, b) => a.baslangic.localeCompare(b.baslangic));
+
+        const iktisap = (() => {
+          const ise = parseISODate(p.ise_giris);
+          const grant = new Date(yillikFormYil, ise.getMonth(), ise.getDate());
+          return toISODate(grant);
+        })();
+
+        const entries = kayitlar.map((k) => {
+          const from = k.baslangic > yilBas ? k.baslangic : yilBas;
+          const to = k.bitis < yilSon ? k.bitis : yilSon;
+          const gun = from <= to ? yearlyLeaveCharge(from, to, tatilMap) : 0;
+          return {
+            id: k.id,
+            tur: izinTurleri.find((t) => t.kod === k.izin_tipi)?.ad ?? k.izin_tipi,
+            basIso: from,
+            bitIso: to,
+            gun,
+          };
+        });
+
+        const toplamGun = entries.reduce((s, e) => s + e.gun, 0);
+        const ilkBas = entries[0]?.basIso ?? "";
+        const sonBit = entries.length
+          ? entries[entries.length - 1].bitIso
+          : "";
+
+        return {
+          personel: p,
+          yil: yillikFormYil,
+          iktisapIso: iktisap,
+          toplamGun,
+          ilkBasIso: ilkBas,
+          sonBitIso: sonBit,
+          entries,
+        };
+      });
+  }, [yillikFormYil, personeller, izinler, tatilMap, izinTurleri]);
+
+  async function yillikFormIndirPng() {
+    const el = yillikFormRef.current;
+    if (!el || yillikFormSayfalari.length === 0) return;
+    setYillikFormDisariAktariliyor(true);
+    setError("");
+    try {
+      const canvas = await captureTakvimElement(el);
+      indirCanvasPng(canvas, `${yillikFormDosyaAdiKoku}.png`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Yillik form PNG olusturulamadi.");
+    } finally {
+      setYillikFormDisariAktariliyor(false);
+    }
+  }
+
+  async function yillikFormIndirPdf() {
+    const el = yillikFormRef.current;
+    if (!el || yillikFormSayfalari.length === 0) return;
+    setYillikFormDisariAktariliyor(true);
+    setError("");
+    try {
+      const canvas = await captureTakvimElement(el);
+      await indirTakvimPdf(canvas, `${yillikFormDosyaAdiKoku}.pdf`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Yillik form PDF olusturulamadi.");
+    } finally {
+      setYillikFormDisariAktariliyor(false);
     }
   }
 
@@ -2146,6 +2238,111 @@ export default function Home() {
               </tbody>
             </table>
             </div>
+          </div>
+        </section>
+
+        <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Yillik Izin Formu</h2>
+              <p className="text-sm text-slate-500">
+                Aktif personellerin secilen yildaki yillik izin kullanim ozet formu ve imza alani.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <span className={labelClass}>Yil</span>
+                <input
+                  className={`${fieldClass} w-28`}
+                  type="number"
+                  value={yillikFormYil}
+                  onChange={(e) => setYillikFormYil(Number(e.target.value))}
+                />
+              </div>
+              <div className="flex flex-col justify-end gap-1">
+                <span className={labelClass}>Disa aktar</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    disabled={yillikFormDisariAktariliyor || yillikFormSayfalari.length === 0}
+                    onClick={() => void yillikFormIndirPng()}
+                    className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    PNG
+                  </button>
+                  <button
+                    type="button"
+                    disabled={yillikFormDisariAktariliyor || yillikFormSayfalari.length === 0}
+                    onClick={() => void yillikFormIndirPdf()}
+                    className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    PDF
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div ref={yillikFormRef} className="rounded-lg border border-slate-200 bg-white p-3" data-takvim-table-wrap>
+            {yillikFormSayfalari.length === 0 ? (
+              <div className="p-4 text-center text-sm text-slate-500">
+                Form olusturmak icin aktif personel bulunamadi.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {yillikFormSayfalari.map((r) => (
+                  <div
+                    key={r.personel.id}
+                    className="rounded-lg border border-slate-300 p-3"
+                    style={{ breakAfter: "page", pageBreakAfter: "always" }}
+                  >
+                    <div className="mb-2 text-center text-sm font-semibold text-slate-900">
+                      YILLIK UCRETLI IZIN FORMU - {r.yil}
+                    </div>
+                    <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+                      <div><span className="font-semibold">Personel:</span> {r.personel.ad}</div>
+                      <div><span className="font-semibold">Iktisap:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
+                      <div><span className="font-semibold">Yol Izni:</span> ___</div>
+                      <div><span className="font-semibold">Toplam Gun:</span> {r.toplamGun}</div>
+                    </div>
+
+                    <table className="w-full border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50">
+                          <th className="border border-slate-200 px-2 py-1 text-left">Mazeret Turu</th>
+                          <th className="border border-slate-200 px-2 py-1 text-center">Baslangic</th>
+                          <th className="border border-slate-200 px-2 py-1 text-center">Son Gun</th>
+                          <th className="border border-slate-200 px-2 py-1 text-center">Gun</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.entries.length === 0 ? (
+                          <tr>
+                            <td className="border border-slate-200 px-2 py-2 text-center text-slate-500" colSpan={4}>
+                              Bu yilda rapor/dis harici kayit yok.
+                            </td>
+                          </tr>
+                        ) : (
+                          r.entries.map((e) => (
+                            <tr key={e.id}>
+                              <td className="border border-slate-200 px-2 py-1">{e.tur}</td>
+                              <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.basIso)}</td>
+                              <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.bitIso)}</td>
+                              <td className="border border-slate-200 px-2 py-1 text-center">{e.gun}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+
+                    <div className="mt-4 text-xs text-slate-700">
+                      <div className="mb-1 font-semibold">Imza</div>
+                      <div className="h-24 rounded-md border border-slate-300" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
