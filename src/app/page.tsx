@@ -1345,6 +1345,58 @@ export default function Home() {
     }
   }
 
+  const seciliPersonelYillikOzet = useMemo(() => {
+    if (!selectedPersonelId) return null;
+    const p = personeller.find((x) => x.id === selectedPersonelId);
+    if (!p) return null;
+
+    const kayitlar = izinler.filter(
+      (i) => i.personel_id === selectedPersonelId && i.izin_tipi === "yillik" && i.bitis >= p.ise_giris,
+    );
+    const hire = parseISODate(p.ise_giris);
+    const ayrilis = p.ayrilis_tarihi ? parseISODate(p.ayrilis_tarihi) : null;
+    const sonYillikBitis = kayitlar.reduce<Date | null>((acc, i) => {
+      const d = parseISODate(i.bitis);
+      if (!acc || d.getTime() > acc.getTime()) return d;
+      return acc;
+    }, null);
+    const bugunRef = new Date();
+    const horizonAday =
+      sonYillikBitis && sonYillikBitis.getTime() > bugunRef.getTime()
+        ? sonYillikBitis
+        : bugunRef;
+    const horizon = ayrilis && ayrilis.getTime() < horizonAday.getTime() ? ayrilis : horizonAday;
+
+    const rows: Array<{ bas: string; hak: number; kullanilan: number }> = [];
+    let toplamHak = 0;
+    let toplamKullanilan = 0;
+    for (let n = 0; n <= 80; n++) {
+      const basDate = new Date(hire.getFullYear() + n, hire.getMonth(), hire.getDate());
+      if (basDate.getTime() > horizon.getTime()) break;
+      const sonrakiYil = new Date(hire.getFullYear() + n + 1, hire.getMonth(), hire.getDate());
+      const donemSon = new Date(sonrakiYil.getTime() - 86400000);
+      const kullanilanDonemSon = donemSon.getTime() < horizon.getTime() ? donemSon : horizon;
+      const basIso = toISODate(basDate);
+      const donemSonIso = toISODate(kullanilanDonemSon);
+      const hak = n === 0 ? 0 : calculateAnnualEntitlementAtGrantDate(p, basDate);
+      let kullanilan = 0;
+      if (basIso <= donemSonIso) {
+        kullanilan = annualLeaveUsedInIsoRange(
+          p,
+          basIso,
+          donemSonIso,
+          izinler,
+          tatilMap,
+        );
+      }
+      if (n === 0) kullanilan += Number(p.devir_onceki_kullanilan_izin ?? 0);
+      rows.push({ bas: isoToDdMmYyyy(basIso), hak, kullanilan });
+      toplamHak += hak;
+      toplamKullanilan += kullanilan;
+    }
+    return { personelAd: p.ad, rows, toplamHak, toplamKullanilan };
+  }, [selectedPersonelId, personeller, izinler, tatilMap]);
+
   const fieldClass =
     "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
   const labelClass =
@@ -2109,6 +2161,38 @@ export default function Home() {
               </select>
             </div>
           </div>
+
+          {seciliPersonelYillikOzet && (
+            <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200">
+              <table className="min-w-[360px] border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50">
+                    <th className="border border-slate-200 px-2 py-1 text-left font-semibold">Yillar</th>
+                    <th className="border border-slate-200 px-2 py-1 text-right font-semibold">Hakedilen</th>
+                    <th className="border border-slate-200 px-2 py-1 text-right font-semibold">Kullanilan</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {seciliPersonelYillikOzet.rows.map((r) => (
+                    <tr key={r.bas}>
+                      <td className="border border-slate-200 px-2 py-1">{r.bas}</td>
+                      <td className="border border-slate-200 px-2 py-1 text-right">{r.hak}</td>
+                      <td className="border border-slate-200 px-2 py-1 text-right">{r.kullanilan}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-slate-50 font-semibold">
+                    <td className="border border-slate-200 px-2 py-1">Toplam</td>
+                    <td className="border border-slate-200 px-2 py-1 text-right">
+                      {seciliPersonelYillikOzet.toplamHak}
+                    </td>
+                    <td className="border border-slate-200 px-2 py-1 text-right">
+                      {seciliPersonelYillikOzet.toplamKullanilan}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <form onSubmit={handlePersonelInsert} className="mt-3 flex flex-wrap gap-2">
             <button
