@@ -1295,9 +1295,10 @@ export default function Home() {
       const horizon = ayrilis && ayrilis.getTime() < horizonAday.getTime() ? ayrilis : horizonAday;
 
       const devirKullanilan = Number(p.devir_onceki_kullanilan_izin ?? 0);
-      const ozetSatirlari: Array<[string, number | string, number]> = [];
+      const ozetSatirlari: Array<[string, number | string, number, number]> = [];
       let toplamHak = 0;
       let toplamKullanilan = devirKullanilan;
+      let birikenDevir = -devirKullanilan;
       for (let n = 0; n <= 80; n++) {
         const bas = new Date(hire.getFullYear() + n, hire.getMonth(), hire.getDate());
         if (bas.getTime() > horizon.getTime()) break;
@@ -1316,15 +1317,16 @@ export default function Home() {
             tatilMap,
           );
         }
-        ozetSatirlari.push([formatKisaTr(bas), hak, kullanilan]);
+        birikenDevir += hak - kullanilan;
+        ozetSatirlari.push([formatKisaTr(bas), hak, kullanilan, birikenDevir]);
         toplamHak += hak;
         toplamKullanilan += kullanilan;
       }
 
-      const ozetBaslik = ["Yillar", "Hakedilen", "Kullanilan"];
+      const ozetBaslik = ["Yillar", "Hakedilen", "Kullanilan", "Sonraki Yila Devir"];
       const ozetVeri = [
-        ["Devir", "", devirKullanilan],
-        ...ozetSatirlari.map((r) => [r[0], r[1], r[2]]),
+        ["Devir", "", devirKullanilan, -devirKullanilan],
+        ...ozetSatirlari.map((r) => [r[0], r[1], r[2], r[3]]),
       ];
       const ws = XLSX.utils.aoa_to_sheet([
         baslik,
@@ -1334,9 +1336,10 @@ export default function Home() {
         ozetBaslik,
         ...ozetVeri,
         [],
-        ["Toplam", toplamHak, toplamKullanilan],
+        ["Toplam", toplamHak, toplamKullanilan, birikenDevir],
+        ["Kullanilmayan Toplam", "", "", birikenDevir],
       ]);
-      ws["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 8 }, { wch: 40 }];
+      ws["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 40 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Mazeret");
       XLSX.writeFile(wb, `mazeret_ekstresi_${dosyaAdiGuvenli(p.ad)}.xlsx`);
@@ -1373,9 +1376,10 @@ export default function Home() {
     const horizon = ayrilis && ayrilis.getTime() < horizonAday.getTime() ? ayrilis : horizonAday;
 
     const devirKullanilan = Number(p.devir_onceki_kullanilan_izin ?? 0);
-    const rows: Array<{ bas: string; hak: number | string; kullanilan: number }> = [];
+    const rows: Array<{ bas: string; hak: number | string; kullanilan: number; devir: number }> = [];
     let toplamHak = 0;
     let toplamKullanilan = devirKullanilan;
+    let birikenDevir = -devirKullanilan;
     for (let n = 0; n <= 80; n++) {
       const basDate = new Date(hire.getFullYear() + n, hire.getMonth(), hire.getDate());
       if (basDate.getTime() > horizon.getTime()) break;
@@ -1395,12 +1399,13 @@ export default function Home() {
           tatilMap,
         );
       }
-      rows.push({ bas: isoToDdMmYyyy(basIso), hak, kullanilan });
+      birikenDevir += hak - kullanilan;
+      rows.push({ bas: isoToDdMmYyyy(basIso), hak, kullanilan, devir: birikenDevir });
       toplamHak += hak;
       toplamKullanilan += kullanilan;
     }
-    rows.unshift({ bas: "Devir", hak: "", kullanilan: devirKullanilan });
-    return { personelAd: p.ad, rows, toplamHak, toplamKullanilan };
+    rows.unshift({ bas: "Devir", hak: "", kullanilan: devirKullanilan, devir: -devirKullanilan });
+    return { personelAd: p.ad, rows, toplamHak, toplamKullanilan, kullanilmayanToplam: birikenDevir };
   }, [selectedPersonelId, personeller, izinler, tatilMap]);
 
   const fieldClass =
@@ -2178,6 +2183,7 @@ export default function Home() {
                     <th className="border border-slate-200 px-2 py-1 text-left font-semibold">Yillar</th>
                     <th className="border border-slate-200 px-2 py-1 text-right font-semibold">Hakedilen</th>
                     <th className="border border-slate-200 px-2 py-1 text-right font-semibold">Kullanilan</th>
+                    <th className="border border-slate-200 px-2 py-1 text-right font-semibold">Sonraki Yila Devir</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2186,6 +2192,7 @@ export default function Home() {
                       <td className="border border-slate-200 px-2 py-1">{r.bas}</td>
                       <td className="border border-slate-200 px-2 py-1 text-right">{r.hak}</td>
                       <td className="border border-slate-200 px-2 py-1 text-right">{r.kullanilan}</td>
+                      <td className="border border-slate-200 px-2 py-1 text-right">{r.devir}</td>
                     </tr>
                   ))}
                   <tr className="bg-slate-50 font-semibold">
@@ -2195,6 +2202,18 @@ export default function Home() {
                     </td>
                     <td className="border border-slate-200 px-2 py-1 text-right">
                       {seciliPersonelYillikOzet.toplamKullanilan}
+                    </td>
+                    <td className="border border-slate-200 px-2 py-1 text-right">
+                      {seciliPersonelYillikOzet.kullanilmayanToplam}
+                    </td>
+                  </tr>
+                  <tr className="bg-emerald-50 font-semibold text-emerald-900">
+                    <td className="border border-slate-200 px-2 py-1">Kullanilmayan Toplam</td>
+                    <td className="border border-slate-200 px-2 py-1 text-right" colSpan={2}>
+                      -
+                    </td>
+                    <td className="border border-slate-200 px-2 py-1 text-right">
+                      {seciliPersonelYillikOzet.kullanilmayanToplam}
                     </td>
                   </tr>
                 </tbody>
