@@ -265,19 +265,15 @@ function calculateAnnualEntitlementAtGrantDate(personel: Personel, grantDate: Da
   return annualEntitlementByRules(kidem, yas);
 }
 
-/**
- * İse giristen, secilen takvim yilinin sonuna kadar (veya ayrilis yilina kadar)
- * tamamlanan her kidem yil donumunde olusan haklari toplar (kumulatif hak).
- */
-function cumulativeAnnualEntitlementThroughYear(
+/** Ise giristen, verilen tarihe kadar olusan tum yillik haklarin toplami. */
+function cumulativeAnnualEntitlementThroughDate(
   personel: Personel,
-  throughCalendarYear: number,
+  throughDate: Date,
 ): number {
   const hire = parseISODate(personel.ise_giris);
-  const endOfYear = parseISODate(endOfCalendarYearIso(throughCalendarYear));
   const leaveDate = personel.ayrilis_tarihi ? parseISODate(personel.ayrilis_tarihi) : null;
   const cutoff =
-    leaveDate && leaveDate.getTime() < endOfYear.getTime() ? leaveDate : endOfYear;
+    leaveDate && leaveDate.getTime() < throughDate.getTime() ? leaveDate : throughDate;
   let sum = 0;
   for (let n = 1; n <= 80; n++) {
     const grantDate = new Date(
@@ -293,15 +289,15 @@ function cumulativeAnnualEntitlementThroughYear(
 
 /**
  * Sistemdeki yillik izin kayitlari + devir oncesi kullanilan (tablo alani) ile
- * kumulatif kullanilan gunler (secilen yilin sonuna kadar, arefe/pazar/tatil kurallariyla).
+ * kumulatif kullanilan gunler (verilen tarihe kadar, arefe/pazar/tatil kurallariyla).
  */
-function cumulativeAnnualUsedThroughYear(
+function cumulativeAnnualUsedThroughDate(
   personel: Personel,
-  throughCalendarYear: number,
+  throughDate: Date,
   allIzinler: Izin[],
   tatilMap: Map<string, string>,
 ): number {
-  const endIso = endOfCalendarYearIso(throughCalendarYear);
+  const endIso = toISODate(throughDate);
   const iseGiris = personel.ise_giris;
   let sum = 0;
   for (const i of allIzinler) {
@@ -805,42 +801,27 @@ export default function Home() {
       takvimGorunum === "havuz_tumu"
         ? takvimPersonelHavuzu
         : takvimPersonelHavuzu.filter((x) => takvimSeciliIds.includes(x.id));
+    const refDate = endOfMonth(year, month);
     return filtered.map((personel) => {
-      const toplamHakedilen = cumulativeAnnualEntitlementThroughYear(personel, year);
-      const yillikKullanilanKumulatif = cumulativeAnnualUsedThroughYear(
+      const toplamHakedilen = cumulativeAnnualEntitlementThroughDate(personel, refDate);
+      const yillikKullanilanKumulatif = cumulativeAnnualUsedThroughDate(
         personel,
-        year,
+        refDate,
         izinler,
         tatilMap,
       );
-      const kalan = Math.max(0, toplamHakedilen - yillikKullanilanKumulatif);
-
-      const kidBounds = workYearBoundsContainingMonth(personel.ise_giris, year, month);
-      let kidemHakEdilen = 0;
-      let kidemKullanilan = 0;
-      let kidemGecerli = false;
-      if (kidBounds) {
-        kidemGecerli = true;
-        kidemHakEdilen = calculateAnnualEntitlementAtGrantDate(
-          personel,
-          parseISODate(kidBounds.bas),
-        );
-        kidemKullanilan = annualLeaveUsedInIsoRange(
-          personel,
-          kidBounds.bas,
-          kidBounds.son,
-          izinler,
-          tatilMap,
-        );
-      }
+      const kalan = toplamHakedilen - yillikKullanilanKumulatif;
+      const buSeneHak = (() => {
+        const hire = parseISODate(personel.ise_giris);
+        const grant = new Date(year, hire.getMonth(), hire.getDate());
+        if (grant.getTime() > refDate.getTime()) return 0;
+        return calculateAnnualEntitlementAtGrantDate(personel, grant);
+      })();
 
       return {
         personel,
-        toplamHakedilen,
+        buSeneHak,
         kalan,
-        kidemGecerli,
-        kidemHakEdilen,
-        kidemKullanilan,
       };
     });
   }, [
@@ -1927,21 +1908,10 @@ export default function Home() {
                         {row.personel.ad}
                       </div>
                       <div className="text-[10px] leading-snug text-slate-500">
-                        Toplam hakedilen: {row.toplamHakedilen} | Kalan: {row.kalan}
+                        Bu sene: {row.buSeneHak} | Kalan: {row.kalan}
                       </div>
                       <div className="text-[9px] leading-tight text-slate-400">
-                        İşe giriş: {isoToDdMmYyyy(row.personel.ise_giris)}
-                      </div>
-                      <div className="text-[9px] leading-tight text-slate-400">
-                        {row.kidemGecerli ? (
-                          <>
-                            Hak edilen: {row.kidemHakEdilen} | Kullanılan: {row.kidemKullanilan}
-                          </>
-                        ) : (
-                          <span className="text-slate-400">
-                            Görüntülenen aydan önce işe giriş yok
-                          </span>
-                        )}
+                        Ise giris: {isoToDdMmYyyy(row.personel.ise_giris)}
                       </div>
                     </td>
                     {daysInMonth.map((d) => {
