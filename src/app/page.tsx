@@ -396,6 +396,10 @@ function getBirthEntitlementByGender(cinsiyet: Cinsiyet): number {
   return cinsiyet === "K" ? 112 : 5;
 }
 
+function usesCalendarDays(izinTipi: IzinKod, personel: Personel | null): boolean {
+  return izinTipi === "rapor" || (izinTipi === "dogum" && personel?.cinsiyet === "K");
+}
+
 function isSunday(date: Date): boolean {
   return date.getDay() === 0;
 }
@@ -885,6 +889,49 @@ export default function Home() {
     );
   }
 
+  const seciliIzinPersonel = useMemo(
+    () => personeller.find((p) => p.id === izinForm.personel_id) ?? null,
+    [personeller, izinForm.personel_id],
+  );
+
+  const mazeretAylikOzetMap = useMemo(() => {
+    const out = new Map<number, string>();
+    if (!seciliIzinPersonel) return out;
+
+    const kodSira: IzinKod[] = ["yillik", "rapor", "dis", "evlilik", "cenaze", "dogum"];
+    for (let monthIdx = 0; monthIdx < 12; monthIdx++) {
+      const ayBas = toISODate(startOfMonth(mazeretTakvimYil, monthIdx));
+      const aySon = toISODate(endOfMonth(mazeretTakvimYil, monthIdx));
+      const toplamlar = new Map<IzinKod, number>();
+
+      for (const iz of izinler) {
+        if (iz.personel_id !== seciliIzinPersonel.id) continue;
+        if (iz.bitis < seciliIzinPersonel.ise_giris) continue;
+        if (iz.bitis < ayBas || iz.baslangic > aySon) continue;
+        const from = iz.baslangic > ayBas ? iz.baslangic : ayBas;
+        const to = iz.bitis < aySon ? iz.bitis : aySon;
+        if (from > to) continue;
+        const gun = usesCalendarDays(iz.izin_tipi, seciliIzinPersonel)
+          ? daterange(from, to).length
+          : yearlyLeaveCharge(from, to, tatilMap);
+        toplamlar.set(iz.izin_tipi, (toplamlar.get(iz.izin_tipi) ?? 0) + gun);
+      }
+
+      const ozet = kodSira
+        .map((kod) => {
+          const v = toplamlar.get(kod) ?? 0;
+          if (v <= 0) return "";
+          const txt =
+            Math.round(v * 10) % 10 === 0 ? String(Math.round(v)) : String(v).replace(".", ",");
+          return `${izinKisaltma[kod]}=${txt}`;
+        })
+        .filter(Boolean)
+        .join(", ");
+      out.set(monthIdx, ozet || "-");
+    }
+    return out;
+  }, [seciliIzinPersonel, mazeretTakvimYil, izinler, tatilMap]);
+
   async function handlePersonelInsert(e: FormEvent<HTMLFormElement>) {
     const sb = getSupabaseClient();
     if (!sb) {
@@ -1025,12 +1072,17 @@ export default function Home() {
 
     const kod = izinForm.izin_tipi;
     const tur = izinTurleri.find((t) => t.kod === kod);
-    let gun = daterange(basIso, bitIso).length;
+    let gun = usesCalendarDays(kod, selectedPersonel)
+      ? daterange(basIso, bitIso).length
+      : yearlyLeaveCharge(basIso, bitIso, tatilMap);
 
     if (kod === "yillik") {
       gun = yearlyLeaveCharge(basIso, bitIso, tatilMap);
     } else if (kod === "dogum") {
-      gun = getBirthEntitlementByGender(selectedPersonel.cinsiyet);
+      gun =
+        selectedPersonel.cinsiyet === "K"
+          ? daterange(basIso, bitIso).length
+          : getBirthEntitlementByGender(selectedPersonel.cinsiyet);
     } else if (tur?.varsayilan_hak_gun) {
       gun = tur.varsayilan_hak_gun;
     }
@@ -1298,7 +1350,7 @@ export default function Home() {
       const ozetSatirlari: Array<[string, number | string, number, number]> = [];
       let toplamHak = 0;
       let toplamKullanilan = devirKullanilan;
-      let birikenDevir = -devirKullanilan;
+      let toplamBakiye = -devirKullanilan;
       for (let n = 0; n <= 80; n++) {
         const bas = new Date(hire.getFullYear() + n, hire.getMonth(), hire.getDate());
         if (bas.getTime() > horizon.getTime()) break;
@@ -1317,10 +1369,11 @@ export default function Home() {
             tatilMap,
           );
         }
-        birikenDevir += hak - kullanilan;
-        ozetSatirlari.push([formatKisaTr(bas), hak, kullanilan, birikenDevir]);
+        const satirBakiye = hak - kullanilan;
+        ozetSatirlari.push([formatKisaTr(bas), hak, kullanilan, satirBakiye]);
         toplamHak += hak;
         toplamKullanilan += kullanilan;
+        toplamBakiye += satirBakiye;
       }
 
       const ozetBaslik = ["Yillar", "Hakedilen", "Kullanilan", "Sonraki Yila Devir"];
@@ -1336,8 +1389,8 @@ export default function Home() {
         ozetBaslik,
         ...ozetVeri,
         [],
-        ["Toplam", toplamHak, toplamKullanilan, birikenDevir],
-        ["Kullanilmayan Toplam", "", "", birikenDevir],
+        ["Toplam", toplamHak, toplamKullanilan, toplamBakiye],
+        ["Kullanilmayan Toplam", "", "", toplamBakiye],
       ]);
       ws["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 40 }];
       const wb = XLSX.utils.book_new();
@@ -1379,7 +1432,7 @@ export default function Home() {
     const rows: Array<{ bas: string; hak: number | string; kullanilan: number; devir: number }> = [];
     let toplamHak = 0;
     let toplamKullanilan = devirKullanilan;
-    let birikenDevir = -devirKullanilan;
+    let toplamBakiye = -devirKullanilan;
     for (let n = 0; n <= 80; n++) {
       const basDate = new Date(hire.getFullYear() + n, hire.getMonth(), hire.getDate());
       if (basDate.getTime() > horizon.getTime()) break;
@@ -1399,13 +1452,14 @@ export default function Home() {
           tatilMap,
         );
       }
-      birikenDevir += hak - kullanilan;
-      rows.push({ bas: isoToDdMmYyyy(basIso), hak, kullanilan, devir: birikenDevir });
+      const satirBakiye = hak - kullanilan;
+      rows.push({ bas: isoToDdMmYyyy(basIso), hak, kullanilan, devir: satirBakiye });
       toplamHak += hak;
       toplamKullanilan += kullanilan;
+      toplamBakiye += satirBakiye;
     }
     rows.unshift({ bas: "Devir", hak: "", kullanilan: devirKullanilan, devir: -devirKullanilan });
-    return { personelAd: p.ad, rows, toplamHak, toplamKullanilan, kullanilmayanToplam: birikenDevir };
+    return { personelAd: p.ad, rows, toplamHak, toplamKullanilan, kullanilmayanToplam: toplamBakiye };
   }, [selectedPersonelId, personeller, izinler, tatilMap]);
 
   const fieldClass =
@@ -1630,10 +1684,16 @@ export default function Home() {
                   const haftalar = monthWeekGrid(mazeretTakvimYil, monthIdx);
                   const gunBaslik = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const;
                   const secTip = (izinForm.izin_tipi || "yillik") as IzinKod;
+                  const ayOzet = mazeretAylikOzetMap.get(monthIdx) ?? "-";
                   return (
                     <div key={ayAd} className="min-w-0 overflow-hidden rounded-md border border-slate-200">
-                      <div className="bg-blue-600 px-1.5 py-0.5 text-center text-[11px] font-semibold text-white">
-                        {ayAd} {mazeretTakvimYil}
+                      <div className="flex items-center justify-between gap-2 bg-blue-600 px-1.5 py-0.5 text-[11px] text-white">
+                        <span className="truncate font-semibold">
+                          {ayAd} {mazeretTakvimYil}
+                        </span>
+                        <span className="truncate text-[10px] font-medium text-blue-100" title={ayOzet}>
+                          {ayOzet}
+                        </span>
                       </div>
                       <table className="w-full table-fixed border-collapse text-center text-[9px]">
                         <thead>
@@ -1672,6 +1732,13 @@ export default function Home() {
                                   iso >= izinFormSecimAraligi.bas &&
                                   iso <= izinFormSecimAraligi.bit;
                                 const mevcut = mazeretTakvimMevcutIzin(iso);
+                                const takvimGunuGecerli =
+                                  !isSunday(gunTarih) && tur !== "resmi_tatil";
+                                const secimTakvimGunBazli = usesCalendarDays(secTip, seciliIzinPersonel);
+                                const secimGoster = secimde && (secimTakvimGunBazli || takvimGunuGecerli);
+                                const mevcutTakvimGunBazli =
+                                  !!mevcut && usesCalendarDays(mevcut.izin_tipi, seciliIzinPersonel);
+                                const mevcutGoster = !!mevcut && (mevcutTakvimGunBazli || takvimGunuGecerli);
                                 const mevcutTurAdi = mevcut
                                   ? izinTurleri.find((t) => t.kod === mevcut.izin_tipi)?.ad ?? mevcut.izin_tipi
                                   : "";
@@ -1680,9 +1747,9 @@ export default function Home() {
                                 const ciroNokta = mazeretTakvimBirinciGun === iso;
 
                                 let zemini: string;
-                                if (secimde) {
+                                if (secimGoster) {
                                   zemini = izinRenk[secTip];
-                                } else if (mevcut && buAy) {
+                                } else if (mevcutGoster && buAy && mevcut) {
                                   // Mevcut izin gunleri yalnizca renkle isaretlenir (metin rozeti yok).
                                   zemini = izinRenk[mevcut.izin_tipi];
                                 } else if (!buAy) {
@@ -1712,9 +1779,9 @@ export default function Home() {
                                       title={
                                         !buAy
                                           ? ""
-                                          : secimde
+                                          : secimGoster
                                             ? `${isoToDdMmYyyy(iso)} — Secim: ${seciliTurAdi}`
-                                            : mevcut
+                                            : mevcutGoster
                                               ? `${isoToDdMmYyyy(iso)} — Mazeret: ${mevcutTurAdi}`
                                               : `${isoToDdMmYyyy(iso)} — Tikla`
                                       }
@@ -2046,9 +2113,11 @@ export default function Home() {
                       const tur = tatilMap.get(d);
                       const izin = izinOfDay(row.personel.id, d);
                       /** Rapor gun bazli takvim gunudur; Pazar/resmi tatilde de gosterilir. */
+                      const izinTakvimGunBazli =
+                        !!izin && usesCalendarDays(izin.izin_tipi, row.personel);
                       const gizleIzin =
                         (isPazar || tur === "resmi_tatil") &&
-                        izin?.izin_tipi !== "rapor";
+                        !izinTakvimGunBazli;
                       const yarimGun = isHalfDay(d, tur);
                       const cellBg =
                         tur === "resmi_tatil"
