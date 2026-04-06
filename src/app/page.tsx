@@ -1071,7 +1071,6 @@ export default function Home() {
     }
 
     const kod = izinForm.izin_tipi;
-    const tur = izinTurleri.find((t) => t.kod === kod);
     let gun = usesCalendarDays(kod, selectedPersonel)
       ? daterange(basIso, bitIso).length
       : yearlyLeaveCharge(basIso, bitIso, tatilMap);
@@ -1083,8 +1082,6 @@ export default function Home() {
         selectedPersonel.cinsiyet === "K"
           ? daterange(basIso, bitIso).length
           : getBirthEntitlementByGender(selectedPersonel.cinsiyet);
-    } else if (tur?.varsayilan_hak_gun) {
-      gun = tur.varsayilan_hak_gun;
     }
 
     type IzinInsert = Database["public"]["Tables"]["izinler"]["Insert"];
@@ -1209,14 +1206,16 @@ export default function Home() {
             continue;
           }
 
-          const tur = izinTurleri.find((t) => t.kod === kod);
-          let gun = daterange(basIso, bitIso).length;
+          let gun = usesCalendarDays(kod, p)
+            ? daterange(basIso, bitIso).length
+            : yearlyLeaveCharge(basIso, bitIso, map);
           if (kod === "yillik") {
             gun = yearlyLeaveCharge(basIso, bitIso, map);
           } else if (kod === "dogum") {
-            gun = getBirthEntitlementByGender(p.cinsiyet);
-          } else if (tur?.varsayilan_hak_gun) {
-            gun = tur.varsayilan_hak_gun;
+            gun =
+              p.cinsiyet === "K"
+                ? daterange(basIso, bitIso).length
+                : getBirthEntitlementByGender(p.cinsiyet);
           }
 
           const payload = {
