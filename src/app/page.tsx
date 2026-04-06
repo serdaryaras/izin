@@ -1276,7 +1276,7 @@ export default function Home() {
   ];
 
   const takvimDosyaAdiKoku = `${ayIsimleri[month]}_${year}`.replace(/\s+/g, "_");
-  const yillikFormDosyaAdiKoku = `yillik_izin_formu_${yillikFormYil}`;
+  const yillikFormDosyaAdiKoku = `Yillik_Izin_Formu_${yillikFormYil}`;
 
   async function takvimIndirPng() {
     const el = takvimExportRef.current;
@@ -1345,7 +1345,7 @@ export default function Home() {
             basIso: from,
             bitIso: to,
             gun,
-            yolIzni: "",
+            yolIzni: "-",
           };
         });
 
@@ -1367,74 +1367,119 @@ export default function Home() {
       });
   }, [yillikFormYil, personeller, izinler, tatilMap, izinTurleri]);
 
-  function yillikFormIndirWord() {
+  async function yillikFormIndirWord() {
     if (yillikFormSayfalari.length === 0) return;
     setYillikFormDisariAktariliyor(true);
     setError("");
     try {
-      const esc = (s: string) =>
-        s
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/\"/g, "&quot;");
+      const {
+        AlignmentType,
+        BorderStyle,
+        Document,
+        HeadingLevel,
+        Packer,
+        Paragraph,
+        Table,
+        TableCell,
+        TableRow,
+        TextRun,
+        WidthType,
+      } = await import("docx");
 
-      const pages = yillikFormSayfalari
-        .map((r, idx) => {
-          const satirlar =
-            r.entries.length === 0
-              ? `<tr><td colspan=\"5\" style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;color:#64748b;\">Bu yilda rapor/dis harici kayit yok.</td></tr>`
-              : r.entries
-                  .map(
-                    (e) =>
-                      `<tr>
-                        <td style=\"border:1px solid #cbd5e1;padding:6px;\">${esc(e.tur)}</td>
-                        <td style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">${esc(isoToDdMmYyyy(e.basIso))}</td>
-                        <td style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">${esc(isoToDdMmYyyy(e.bitIso))}</td>
-                        <td style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">${e.gun}</td>
-                        <td style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">___</td>
-                      </tr>`,
-                  )
-                  .join("");
+      const sections = yillikFormSayfalari.map((r) => {
+        const pageChildren: Array<
+          InstanceType<typeof Paragraph> | InstanceType<typeof Table>
+        > = [
+          new Paragraph({
+            text: `YILLIK UCRETLI IZIN FORMU - ${r.yil}`,
+            heading: HeadingLevel.HEADING_2,
+            alignment: AlignmentType.CENTER,
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: `Personel: ${r.personel.ad}   `, bold: true }),
+              new TextRun({ text: `Iktisap: ${isoToDdMmYyyy(r.iktisapIso)}   ` }),
+              new TextRun({ text: `Toplam Gun: ${r.toplamGun}` }),
+            ],
+          }),
+        ];
 
-          const pageBreak = idx < yillikFormSayfalari.length - 1 ? "page-break-after: always;" : "";
-          return `<div style=\"${pageBreak} padding:8px;\">
-            <h2 style=\"text-align:center;font-size:16px;margin:0 0 8px 0;\">YILLIK UCRETLI IZIN FORMU - ${r.yil}</h2>
-            <div style=\"display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:12px;\">
-              <div><b>Personel:</b> ${esc(r.personel.ad)}</div>
-              <div><b>Iktisap:</b> ${esc(isoToDdMmYyyy(r.iktisapIso))}</div>
-              <div><b>Toplam Gun:</b> ${r.toplamGun}</div>
-            </div>
-            <table style=\"width:100%;border-collapse:collapse;font-size:12px;\">
-              <thead>
-                <tr style=\"background:#f8fafc;\">
-                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:left;\">Mazeret Turu</th>
-                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">Baslangic</th>
-                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">Son Gun</th>
-                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">Gun</th>
-                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">Yol Izni</th>
-                </tr>
-              </thead>
-              <tbody>${satirlar}</tbody>
-            </table>
-            <div style=\"margin-top:14px;\">
-              <div style=\"font-size:12px;font-weight:600;margin-bottom:4px;\">Imza</div>
-              <div style=\"height:140px;border:1px solid #94a3b8;border-radius:6px;\"></div>
-            </div>
-          </div>`;
-        })
-        .join("");
+        const rows = [
+          new TableRow({
+            children: ["Mazeret Turu", "Baslangic", "Son Gun", "Gun", "Yol Izni"].map(
+              (h) =>
+                new TableCell({
+                  children: [new Paragraph({ text: h })],
+                }),
+            ),
+          }),
+        ];
+        if (r.entries.length === 0) {
+          rows.push(
+            new TableRow({
+              children: [
+                new TableCell({
+                  columnSpan: 5,
+                  children: [new Paragraph("Bu yilda rapor/dis harici kayit yok.")],
+                }),
+              ],
+            }),
+          );
+        } else {
+          r.entries.forEach((e) => {
+            rows.push(
+              new TableRow({
+                children: [
+                  new TableCell({ children: [new Paragraph(e.tur)] }),
+                  new TableCell({ children: [new Paragraph(isoToDdMmYyyy(e.basIso))] }),
+                  new TableCell({ children: [new Paragraph(isoToDdMmYyyy(e.bitIso))] }),
+                  new TableCell({ children: [new Paragraph(String(e.gun))] }),
+                  new TableCell({ children: [new Paragraph("-")] }),
+                ],
+              }),
+            );
+          });
+        }
+        pageChildren.push(
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows,
+          }),
+          new Paragraph({ text: "" }),
+          new Paragraph({ children: [new TextRun({ text: "Imza", bold: true })] }),
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: [
+              new TableRow({
+                children: [
+                  new TableCell({
+                    children: [new Paragraph(" ")],
+                    borders: {
+                      top: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
+                      bottom: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
+                      left: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
+                      right: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
+                    },
+                  }),
+                ],
+                height: { value: 2200, rule: "atLeast" },
+              }),
+            ],
+          }),
+        );
+        return { children: pageChildren };
+      });
 
-      const html = `<!doctype html><html><head><meta charset=\"utf-8\"></head><body>${pages}</body></html>`;
-      const blob = new Blob([html], { type: "application/msword;charset=utf-8" });
+      const doc = new Document({ sections });
+      const blob = await Packer.toBlob(doc);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${yillikFormDosyaAdiKoku}.doc`;
+      a.download = `${yillikFormDosyaAdiKoku}.docx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Yillik form Word olusturulamadi.");
+      setError(err instanceof Error ? err.message : "Yillik form DOCX olusturulamadi.");
     } finally {
       setYillikFormDisariAktariliyor(false);
     }
@@ -2312,7 +2357,7 @@ export default function Home() {
                     onClick={() => yillikFormIndirWord()}
                     className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Word (.doc)
+                    Word (.docx)
                   </button>
                 </div>
               </div>
@@ -2338,7 +2383,7 @@ export default function Home() {
                     <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
                       <div><span className="font-semibold">Personel:</span> {r.personel.ad}</div>
                       <div><span className="font-semibold">Iktisap:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
-                      <div><span className="font-semibold">Yol Izni:</span> ___</div>
+                      <div><span className="font-semibold">Yol Izni:</span> -</div>
                       <div><span className="font-semibold">Toplam Gun:</span> {r.toplamGun}</div>
                     </div>
 
@@ -2366,7 +2411,7 @@ export default function Home() {
                               <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.basIso)}</td>
                               <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.bitIso)}</td>
                               <td className="border border-slate-200 px-2 py-1 text-center">{e.gun}</td>
-                              <td className="border border-slate-200 px-2 py-1 text-center">___</td>
+                              <td className="border border-slate-200 px-2 py-1 text-center">-</td>
                             </tr>
                           ))
                         )}
