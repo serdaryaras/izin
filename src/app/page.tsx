@@ -825,8 +825,11 @@ export default function Home() {
   ]);
 
   function izinOfDay(personelId: string, dayIso: string): Izin | undefined {
+    const p = personeller.find((x) => x.id === personelId);
+    if (!p || dayIso < p.ise_giris) return undefined;
     return izinler.find((iz) => {
       if (iz.personel_id !== personelId) return false;
+      if (iz.bitis < p.ise_giris) return false;
       return dayIso >= iz.baslangic && dayIso <= iz.bitis;
     });
   }
@@ -866,8 +869,14 @@ export default function Home() {
   function mazeretTakvimMevcutIzin(dayIso: string): Izin | undefined {
     const pid = izinForm.personel_id;
     if (!pid) return undefined;
+    const p = personeller.find((x) => x.id === pid);
+    if (!p || dayIso < p.ise_giris) return undefined;
     return izinler.find(
-      (iz) => iz.personel_id === pid && dayIso >= iz.baslangic && dayIso <= iz.bitis,
+      (iz) =>
+        iz.personel_id === pid &&
+        iz.bitis >= p.ise_giris &&
+        dayIso >= iz.baslangic &&
+        dayIso <= iz.bitis,
     );
   }
 
@@ -1243,7 +1252,7 @@ export default function Home() {
     try {
       const XLSX = await import("xlsx");
       const kayitlar = izinler
-        .filter((i) => i.personel_id === selectedPersonelId)
+        .filter((i) => i.personel_id === selectedPersonelId && i.bitis >= p.ise_giris)
         .slice()
         .sort((a, b) => a.baslangic.localeCompare(b.baslangic));
       const baslik = [
@@ -1265,7 +1274,63 @@ export default function Home() {
           i.aciklama ?? "",
         ];
       });
-      const ws = XLSX.utils.aoa_to_sheet([baslik, ...satirlar]);
+      const yillikKayitlar = kayitlar.filter((i) => i.izin_tipi === "yillik");
+      const formatKisaTr = (d: Date) => `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
+      const hire = parseISODate(p.ise_giris);
+      const ayrilis = p.ayrilis_tarihi ? parseISODate(p.ayrilis_tarihi) : null;
+      const sonYillikBitis = yillikKayitlar.reduce<Date | null>((acc, i) => {
+        const d = parseISODate(i.bitis);
+        if (!acc || d.getTime() > acc.getTime()) return d;
+        return acc;
+      }, null);
+      const bugunRef = new Date();
+      const horizonAday = sonYillikBitis && sonYillikBitis.getTime() > bugunRef.getTime()
+        ? sonYillikBitis
+        : bugunRef;
+      const horizon = ayrilis && ayrilis.getTime() < horizonAday.getTime() ? ayrilis : horizonAday;
+
+      const ozetSatirlari: Array<[string, number, number]> = [];
+      let toplamHak = 0;
+      let toplamKullanilan = 0;
+      for (let n = 0; n <= 80; n++) {
+        const bas = new Date(hire.getFullYear() + n, hire.getMonth(), hire.getDate());
+        if (bas.getTime() > horizon.getTime()) break;
+        const sonrakiYil = new Date(hire.getFullYear() + n + 1, hire.getMonth(), hire.getDate());
+        const donemSon = new Date(sonrakiYil.getTime() - 86400000);
+        const kullanilanDonemSon =
+          donemSon.getTime() < horizon.getTime() ? donemSon : horizon;
+        const hak = n === 0 ? 0 : calculateAnnualEntitlementAtGrantDate(p, bas);
+        let kullanilan = 0;
+        if (toISODate(bas) <= toISODate(kullanilanDonemSon)) {
+          kullanilan = annualLeaveUsedInIsoRange(
+            p,
+            toISODate(bas),
+            toISODate(kullanilanDonemSon),
+            izinler,
+            tatilMap,
+          );
+        }
+        if (n === 0) {
+          // Sistem oncesi kullanim bilgisi ilk kidem donemine eklenir.
+          kullanilan += Number(p.devir_onceki_kullanilan_izin ?? 0);
+        }
+        ozetSatirlari.push([formatKisaTr(bas), hak, kullanilan]);
+        toplamHak += hak;
+        toplamKullanilan += kullanilan;
+      }
+
+      const ozetBaslik = ["Yillar", "Hakedilen", "Kullanilan"];
+      const ozetVeri = ozetSatirlari.map((r) => [r[0], r[1], r[2]]);
+      const ws = XLSX.utils.aoa_to_sheet([
+        baslik,
+        ...satirlar,
+        [],
+        ["Yillik Izin Ozeti"],
+        ozetBaslik,
+        ...ozetVeri,
+        [],
+        ["Toplam", toplamHak, toplamKullanilan],
+      ]);
       ws["!cols"] = [{ wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 8 }, { wch: 40 }];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Mazeret");
@@ -1544,6 +1609,11 @@ export default function Home() {
                                   iso >= izinFormSecimAraligi.bas &&
                                   iso <= izinFormSecimAraligi.bit;
                                 const mevcut = mazeretTakvimMevcutIzin(iso);
+                                const mevcutTurAdi = mevcut
+                                  ? izinTurleri.find((t) => t.kod === mevcut.izin_tipi)?.ad ?? mevcut.izin_tipi
+                                  : "";
+                                const seciliTurAdi =
+                                  izinTurleri.find((t) => t.kod === secTip)?.ad ?? secTip;
                                 const ciroNokta = mazeretTakvimBirinciGun === iso;
 
                                 let zemini: string;
@@ -1577,9 +1647,13 @@ export default function Home() {
                                         ciroNokta ? "ring-2 ring-amber-500 ring-offset-1" : "",
                                       ].join(" ")}
                                       title={
-                                        buAy
-                                          ? `${isoToDdMmYyyy(iso)} — tikla`
-                                          : ""
+                                        !buAy
+                                          ? ""
+                                          : secimde
+                                            ? `${isoToDdMmYyyy(iso)} — Secim: ${seciliTurAdi}`
+                                            : mevcut
+                                              ? `${isoToDdMmYyyy(iso)} — Mazeret: ${mevcutTurAdi}`
+                                              : `${isoToDdMmYyyy(iso)} — Tikla`
                                       }
                                     >
                                       <span className={buAy ? "font-medium" : ""}>{gunTarih.getDate()}</span>
