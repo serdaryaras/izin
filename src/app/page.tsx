@@ -462,6 +462,15 @@ function izinCakismaListesiMetni(
   return `${metin}${kalan}`;
 }
 
+function yasalIzinLimitiniBul(kod: IzinKod, izinTurleri: IzinTuru[]): number | null {
+  if (kod !== "cenaze" && kod !== "dogum" && kod !== "evlilik") return null;
+  const fromDb = izinTurleri.find((t) => t.kod === kod)?.varsayilan_hak_gun;
+  if (typeof fromDb === "number" && Number.isFinite(fromDb) && fromDb > 0) return fromDb;
+  // Varsayilan yasal gunler: evlilik 3, cenaze 3, dogum 5.
+  if (kod === "dogum") return 5;
+  return 3;
+}
+
 function isSunday(date: Date): boolean {
   return date.getDay() === 0;
 }
@@ -618,7 +627,7 @@ export default function Home() {
   const mazeretTurKutuRef = useRef<HTMLDivElement>(null);
   const [mazeretFormMesaj, setMazeretFormMesaj] = useState<{
     text: string;
-    tip: "ok" | "err";
+    tip: "ok" | "err" | "warn";
   } | null>(null);
   const excelIzinInputRef = useRef<HTMLInputElement>(null);
   const [excelIzinYukleniyor, setExcelIzinYukleniyor] = useState(false);
@@ -1145,6 +1154,16 @@ export default function Home() {
 
     const kod = izinForm.izin_tipi;
     const gun = yearlyLeaveCharge(basIso, bitIso, tatilMap);
+    const yasalLimit = yasalIzinLimitiniBul(kod, izinTurleri);
+    if (yasalLimit != null && gun > yasalLimit) {
+      const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
+      setMazeretFormMesaj({
+        text: `${turAd} icin yasal sure asildi (${gun} gun > ${yasalLimit} gun). Kayit eklenmedi.`,
+        tip: "warn",
+      });
+      setSaving(false);
+      return;
+    }
 
     type IzinInsert = Database["public"]["Tables"]["izinler"]["Insert"];
 
@@ -1279,6 +1298,14 @@ export default function Home() {
           }
 
           const gun = yearlyLeaveCharge(basIso, bitIso, map);
+          const yasalLimit = yasalIzinLimitiniBul(kod, izinTurleri);
+          if (yasalLimit != null && gun > yasalLimit) {
+            const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
+            hatalar.push(
+              `Satir ${satirNo}: ${turAd} icin yasal sure asildi (${gun} gun > ${yasalLimit} gun).`,
+            );
+            continue;
+          }
 
           const payload = {
             personel_id: p.id,
@@ -2060,7 +2087,11 @@ export default function Home() {
                 <p
                   role="status"
                   className={`max-w-xl text-sm font-medium ${
-                    mazeretFormMesaj.tip === "ok" ? "text-emerald-800" : "text-red-700"
+                    mazeretFormMesaj.tip === "ok"
+                      ? "text-emerald-800"
+                      : mazeretFormMesaj.tip === "warn"
+                        ? "text-amber-700"
+                        : "text-red-700"
                   }`}
                 >
                   {mazeretFormMesaj.text}
