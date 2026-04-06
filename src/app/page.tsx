@@ -135,14 +135,26 @@ function combValueAfterFullSelection(raw: string, fullLabel: string, prevShown: 
 
 /** gg.aa.yyyy veya g-a-yyyy (1-2 hane gun/ay); gecerliyse yyyy-mm-dd */
 function ddMmYyyyToIso(tr: string): string | null {
-  const t = tr.trim();
+  const t = tr.replace(/\u00a0/g, " ").trim();
   if (!t) return null;
-  let m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(t);
-  if (!m) m = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(t);
-  if (!m) return null;
-  const day = Number(m[1]);
-  const month = Number(m[2]);
-  const year = Number(m[3]);
+
+  // Metin icinde tarih geciyorsa (or. "27.02.2017 Sal"), tarih parcasi yakalanir.
+  let m = /(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/.exec(t);
+  let day: number;
+  let month: number;
+  let year: number;
+  if (m) {
+    day = Number(m[1]);
+    month = Number(m[2]);
+    year = Number(m[3]);
+  } else {
+    const ymd = /(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/.exec(t);
+    if (!ymd) return null;
+    year = Number(ymd[1]);
+    month = Number(ymd[2]);
+    day = Number(ymd[3]);
+  }
+
   const dt = new Date(year, month - 1, day);
   if (
     dt.getFullYear() !== year ||
@@ -162,7 +174,8 @@ function adKeyTr(s: string): string {
 function hucreyiTarihMetnine(v: unknown): string {
   if (v == null || v === "") return "";
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    return `${v.getDate()}.${v.getMonth() + 1}.${v.getFullYear()}`;
+    // Excel Date hucrelerinde timezone kaymasini engellemek icin UTC parcalari kullanilir.
+    return `${v.getUTCDate()}.${v.getUTCMonth() + 1}.${v.getUTCFullYear()}`;
   }
   if (typeof v === "number" && Number.isFinite(v)) {
     const ms = Math.round((v - 25569) * 86400 * 1000);
