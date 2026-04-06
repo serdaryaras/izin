@@ -554,8 +554,6 @@ export default function Home() {
     eklenen: number;
     hatalar: string[];
   } | null>(null);
-  /** loadData sonrasi bos personel secimini ezmemek icin (ilk acilista bir kez varsayilan) */
-  const mazeretVarsayilanPersonelVerildi = useRef(false);
   const takvimExportRef = useRef<HTMLDivElement>(null);
   const [takvimDisariAktariliyor, setTakvimDisariAktariliyor] = useState(false);
 
@@ -623,14 +621,6 @@ export default function Home() {
     setSelectedPersonelId((prev) =>
       prev && pList.some((p) => p.id === prev) ? prev : "",
     );
-    setIzinForm((prev) => {
-      if (prev.personel_id) return prev;
-      if (!mazeretVarsayilanPersonelVerildi.current && pList[0]?.id) {
-        mazeretVarsayilanPersonelVerildi.current = true;
-        return { ...prev, personel_id: pList[0].id };
-      }
-      return prev;
-    });
     setLoading(false);
   }
 
@@ -1047,7 +1037,6 @@ export default function Home() {
     if (insError) setMazeretFormMesaj({ text: insError.message, tip: "err" });
     else {
       setMazeretFormMesaj({ text: "Kayit eklendi.", tip: "ok" });
-      mazeretVarsayilanPersonelVerildi.current = true;
       await loadData();
       setIzinForm({
         personel_id: "",
