@@ -247,9 +247,14 @@ function endOfCalendarYearIso(y: number): string {
 
 /** Kidem/yas kurallarina gore yillik hak (gun) */
 function annualEntitlementByRules(kidemYil: number, yas: number): number {
+  /**
+   * Hak yil donumunde dogdugu icin band hesabinda 1 yil kaydirma uygulanir:
+   * 1..5. hak yili => 14, 6..15. hak yili => 20, 16+ => 26.
+   */
+  const bandKidem = Math.max(0, kidemYil - 1);
   let hak = 14;
-  if (kidemYil >= 5 && kidemYil < 15) hak = 20;
-  if (kidemYil >= 15) hak = 26;
+  if (bandKidem >= 5 && bandKidem < 15) hak = 20;
+  if (bandKidem >= 15) hak = 26;
   if (yas < 18 || yas >= 50) hak = Math.max(hak, 20);
   return hak;
 }
@@ -2090,15 +2095,17 @@ export default function Home() {
               </select>
             </div>
 
-            <div>
-              <label className={labelClass}>Ad Soyad</label>
-              <input
-                className={fieldClass}
-                placeholder="Orn: Ali Veli"
-                value={personelForm.ad}
-                onChange={(e) => setPersonelForm((prev) => ({ ...prev, ad: e.target.value }))}
-              />
-            </div>
+            {!selectedPersonelId && (
+              <div>
+                <label className={labelClass}>Ad Soyad</label>
+                <input
+                  className={fieldClass}
+                  placeholder="Orn: Ali Veli"
+                  value={personelForm.ad}
+                  onChange={(e) => setPersonelForm((prev) => ({ ...prev, ad: e.target.value }))}
+                />
+              </div>
+            )}
             <div>
               <label className={labelClass}>Dogum Tarihi (gg.aa.yyyy)</label>
               <input
