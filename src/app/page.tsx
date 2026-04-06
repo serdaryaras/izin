@@ -363,7 +363,8 @@ function yearlyLeaveCharge(
   for (const day of daterange(fromIso, toIso)) {
     const d = parseISODate(day);
     const tur = tatilMap.get(day);
-    if (isSunday(d) || tur === "resmi_tatil") continue;
+    const isBoundary = day === fromIso || day === toIso;
+    if (!isBoundary && (isSunday(d) || tur === "resmi_tatil")) continue;
     if (isHalfDay(day, tur)) {
       toplam += 0.5;
       continue;
@@ -371,6 +372,18 @@ function yearlyLeaveCharge(
     toplam += 1;
   }
   return toplam;
+}
+
+function shouldShowOnDay(
+  izin: Izin,
+  dayIso: string,
+  personel: Personel,
+  tatilTur?: string,
+): boolean {
+  if (usesCalendarDays(izin.izin_tipi, personel)) return true;
+  const d = parseISODate(dayIso);
+  if (!isSunday(d) && tatilTur !== "resmi_tatil") return true;
+  return dayIso === izin.baslangic || dayIso === izin.bitis;
 }
 
 function annualLeaveUsedInIsoRange(
@@ -1737,7 +1750,11 @@ export default function Home() {
                                 const secimGoster = secimde && (secimTakvimGunBazli || takvimGunuGecerli);
                                 const mevcutTakvimGunBazli =
                                   !!mevcut && usesCalendarDays(mevcut.izin_tipi, seciliIzinPersonel);
-                                const mevcutGoster = !!mevcut && (mevcutTakvimGunBazli || takvimGunuGecerli);
+                                const mevcutSinirGunMu =
+                                  !!mevcut && (iso === mevcut.baslangic || iso === mevcut.bitis);
+                                const mevcutGoster =
+                                  !!mevcut &&
+                                  (mevcutTakvimGunBazli || takvimGunuGecerli || mevcutSinirGunMu);
                                 const mevcutTurAdi = mevcut
                                   ? izinTurleri.find((t) => t.kod === mevcut.izin_tipi)?.ad ?? mevcut.izin_tipi
                                   : "";
@@ -2112,11 +2129,9 @@ export default function Home() {
                       const tur = tatilMap.get(d);
                       const izin = izinOfDay(row.personel.id, d);
                       /** Rapor gun bazli takvim gunudur; Pazar/resmi tatilde de gosterilir. */
-                      const izinTakvimGunBazli =
-                        !!izin && usesCalendarDays(izin.izin_tipi, row.personel);
                       const gizleIzin =
-                        (isPazar || tur === "resmi_tatil") &&
-                        !izinTakvimGunBazli;
+                        !!izin &&
+                        !shouldShowOnDay(izin, d, row.personel, tur);
                       const yarimGun = isHalfDay(d, tur);
                       const cellBg =
                         tur === "resmi_tatil"
