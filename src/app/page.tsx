@@ -426,6 +426,42 @@ function annualLeaveUsedInIsoRange(
   return sum;
 }
 
+function isoRangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  return aStart <= bEnd && bStart <= aEnd;
+}
+
+function findOverlappingIzinler(
+  izinler: Izin[],
+  personelId: string,
+  basIso: string,
+  bitIso: string,
+): Izin[] {
+  return izinler.filter(
+    (i) =>
+      i.personel_id === personelId &&
+      isoRangesOverlap(i.baslangic, i.bitis, basIso, bitIso),
+  );
+}
+
+function izinCakismaListesiMetni(
+  cakisanlar: Izin[],
+  izinTurleri: IzinTuru[],
+  limit = 5,
+): string {
+  if (cakisanlar.length === 0) return "";
+  const metin = cakisanlar
+    .slice()
+    .sort((a, b) => a.baslangic.localeCompare(b.baslangic))
+    .slice(0, limit)
+    .map((c) => {
+      const turAd = izinTurleri.find((t) => t.kod === c.izin_tipi)?.ad ?? c.izin_tipi;
+      return `${isoToDdMmYyyy(c.baslangic)} - ${isoToDdMmYyyy(c.bitis)} (${turAd})`;
+    })
+    .join("; ");
+  const kalan = cakisanlar.length > limit ? ` (+${cakisanlar.length - limit} kayit daha)` : "";
+  return `${metin}${kalan}`;
+}
+
 function isSunday(date: Date): boolean {
   return date.getDay() === 0;
 }
@@ -1096,6 +1132,16 @@ export default function Home() {
       setSaving(false);
       return;
     }
+    const cakisanlar = findOverlappingIzinler(izinler, izinForm.personel_id, basIso, bitIso);
+    if (cakisanlar.length > 0) {
+      const detay = izinCakismaListesiMetni(cakisanlar, izinTurleri);
+      setMazeretFormMesaj({
+        text: `Ayni gun icin ikinci kayit kabul edilmedi. Cakisan kayitlar: ${detay}`,
+        tip: "err",
+      });
+      setSaving(false);
+      return;
+    }
 
     const kod = izinForm.izin_tipi;
     const gun = yearlyLeaveCharge(basIso, bitIso, tatilMap);
@@ -1184,6 +1230,7 @@ export default function Home() {
         if (!i0t1 || !i0t2) basSatir = 1;
 
         const map = tatilMap;
+        const izinlerOnbellek = izinler.slice();
 
         for (let i = basSatir; i < rows.length && i < maxSatir; i++) {
           const row = rows[i];
@@ -1222,6 +1269,14 @@ export default function Home() {
             );
             continue;
           }
+          const cakisanlar = findOverlappingIzinler(izinlerOnbellek, p.id, basIso, bitIso);
+          if (cakisanlar.length > 0) {
+            const detay = izinCakismaListesiMetni(cakisanlar, izinTurleri, 3);
+            hatalar.push(
+              `Satir ${satirNo}: Ayni gun icin ikinci kayit kabul edilmedi. Cakisanlar: ${detay}`,
+            );
+            continue;
+          }
 
           const gun = yearlyLeaveCharge(basIso, bitIso, map);
 
@@ -1240,6 +1295,16 @@ export default function Home() {
             hatalar.push(`Satir ${satirNo}: ${insErr.message}`);
           } else {
             eklenen += 1;
+            izinlerOnbellek.push({
+              id: `excel-${satirNo}-${p.id}`,
+              personel_id: p.id,
+              izin_tipi: kod,
+              baslangic: basIso,
+              bitis: bitIso,
+              gun_sayisi: gun,
+              gun,
+              aciklama: null,
+            });
           }
         }
 
@@ -1398,7 +1463,7 @@ export default function Home() {
           new Paragraph({
             children: [
               new TextRun({ text: `Personel: ${r.personel.ad}   `, bold: true }),
-              new TextRun({ text: `Iktisap: ${isoToDdMmYyyy(r.iktisapIso)}   ` }),
+              new TextRun({ text: `Iktisap Tarihi: ${isoToDdMmYyyy(r.iktisapIso)}   ` }),
               new TextRun({ text: `Toplam Gun: ${r.toplamGun}` }),
             ],
           }),
@@ -2380,10 +2445,9 @@ export default function Home() {
                     <div className="mb-2 text-center text-sm font-semibold text-slate-900">
                       YILLIK UCRETLI IZIN FORMU - {r.yil}
                     </div>
-                    <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+                    <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-3">
                       <div><span className="font-semibold">Personel:</span> {r.personel.ad}</div>
-                      <div><span className="font-semibold">Iktisap:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
-                      <div><span className="font-semibold">Yol Izni:</span> -</div>
+                      <div><span className="font-semibold">Iktisap Tarihi:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
                       <div><span className="font-semibold">Toplam Gun:</span> {r.toplamGun}</div>
                     </div>
 
