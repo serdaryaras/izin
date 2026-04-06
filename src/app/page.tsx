@@ -1345,6 +1345,7 @@ export default function Home() {
             basIso: from,
             bitIso: to,
             gun,
+            yolIzni: "",
           };
         });
 
@@ -1366,31 +1367,74 @@ export default function Home() {
       });
   }, [yillikFormYil, personeller, izinler, tatilMap, izinTurleri]);
 
-  async function yillikFormIndirPng() {
-    const el = yillikFormRef.current;
-    if (!el || yillikFormSayfalari.length === 0) return;
+  function yillikFormIndirWord() {
+    if (yillikFormSayfalari.length === 0) return;
     setYillikFormDisariAktariliyor(true);
     setError("");
     try {
-      const canvas = await captureTakvimElement(el);
-      indirCanvasPng(canvas, `${yillikFormDosyaAdiKoku}.png`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Yillik form PNG olusturulamadi.");
-    } finally {
-      setYillikFormDisariAktariliyor(false);
-    }
-  }
+      const esc = (s: string) =>
+        s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/\"/g, "&quot;");
 
-  async function yillikFormIndirPdf() {
-    const el = yillikFormRef.current;
-    if (!el || yillikFormSayfalari.length === 0) return;
-    setYillikFormDisariAktariliyor(true);
-    setError("");
-    try {
-      const canvas = await captureTakvimElement(el);
-      await indirTakvimPdf(canvas, `${yillikFormDosyaAdiKoku}.pdf`);
+      const pages = yillikFormSayfalari
+        .map((r, idx) => {
+          const satirlar =
+            r.entries.length === 0
+              ? `<tr><td colspan=\"5\" style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;color:#64748b;\">Bu yilda rapor/dis harici kayit yok.</td></tr>`
+              : r.entries
+                  .map(
+                    (e) =>
+                      `<tr>
+                        <td style=\"border:1px solid #cbd5e1;padding:6px;\">${esc(e.tur)}</td>
+                        <td style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">${esc(isoToDdMmYyyy(e.basIso))}</td>
+                        <td style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">${esc(isoToDdMmYyyy(e.bitIso))}</td>
+                        <td style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">${e.gun}</td>
+                        <td style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">___</td>
+                      </tr>`,
+                  )
+                  .join("");
+
+          const pageBreak = idx < yillikFormSayfalari.length - 1 ? "page-break-after: always;" : "";
+          return `<div style=\"${pageBreak} padding:8px;\">
+            <h2 style=\"text-align:center;font-size:16px;margin:0 0 8px 0;\">YILLIK UCRETLI IZIN FORMU - ${r.yil}</h2>
+            <div style=\"display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:12px;\">
+              <div><b>Personel:</b> ${esc(r.personel.ad)}</div>
+              <div><b>Iktisap:</b> ${esc(isoToDdMmYyyy(r.iktisapIso))}</div>
+              <div><b>Toplam Gun:</b> ${r.toplamGun}</div>
+            </div>
+            <table style=\"width:100%;border-collapse:collapse;font-size:12px;\">
+              <thead>
+                <tr style=\"background:#f8fafc;\">
+                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:left;\">Mazeret Turu</th>
+                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">Baslangic</th>
+                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">Son Gun</th>
+                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">Gun</th>
+                  <th style=\"border:1px solid #cbd5e1;padding:6px;text-align:center;\">Yol Izni</th>
+                </tr>
+              </thead>
+              <tbody>${satirlar}</tbody>
+            </table>
+            <div style=\"margin-top:14px;\">
+              <div style=\"font-size:12px;font-weight:600;margin-bottom:4px;\">Imza</div>
+              <div style=\"height:140px;border:1px solid #94a3b8;border-radius:6px;\"></div>
+            </div>
+          </div>`;
+        })
+        .join("");
+
+      const html = `<!doctype html><html><head><meta charset=\"utf-8\"></head><body>${pages}</body></html>`;
+      const blob = new Blob([html], { type: "application/msword;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${yillikFormDosyaAdiKoku}.doc`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Yillik form PDF olusturulamadi.");
+      setError(err instanceof Error ? err.message : "Yillik form Word olusturulamadi.");
     } finally {
       setYillikFormDisariAktariliyor(false);
     }
@@ -2265,18 +2309,10 @@ export default function Home() {
                   <button
                     type="button"
                     disabled={yillikFormDisariAktariliyor || yillikFormSayfalari.length === 0}
-                    onClick={() => void yillikFormIndirPng()}
+                    onClick={() => yillikFormIndirWord()}
                     className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    PNG
-                  </button>
-                  <button
-                    type="button"
-                    disabled={yillikFormDisariAktariliyor || yillikFormSayfalari.length === 0}
-                    onClick={() => void yillikFormIndirPdf()}
-                    className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    PDF
+                    Word (.doc)
                   </button>
                 </div>
               </div>
@@ -2313,12 +2349,13 @@ export default function Home() {
                           <th className="border border-slate-200 px-2 py-1 text-center">Baslangic</th>
                           <th className="border border-slate-200 px-2 py-1 text-center">Son Gun</th>
                           <th className="border border-slate-200 px-2 py-1 text-center">Gun</th>
+                          <th className="border border-slate-200 px-2 py-1 text-center">Yol Izni</th>
                         </tr>
                       </thead>
                       <tbody>
                         {r.entries.length === 0 ? (
                           <tr>
-                            <td className="border border-slate-200 px-2 py-2 text-center text-slate-500" colSpan={4}>
+                            <td className="border border-slate-200 px-2 py-2 text-center text-slate-500" colSpan={5}>
                               Bu yilda rapor/dis harici kayit yok.
                             </td>
                           </tr>
@@ -2329,6 +2366,7 @@ export default function Home() {
                               <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.basIso)}</td>
                               <td className="border border-slate-200 px-2 py-1 text-center">{isoToDdMmYyyy(e.bitIso)}</td>
                               <td className="border border-slate-200 px-2 py-1 text-center">{e.gun}</td>
+                              <td className="border border-slate-200 px-2 py-1 text-center">___</td>
                             </tr>
                           ))
                         )}
