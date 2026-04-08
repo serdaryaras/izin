@@ -68,6 +68,9 @@ function hhmmToMinutes(text: string): number {
 function isWeekend(d: Date): boolean {
   return d.getDay() === 0 || d.getDay() === 6;
 }
+function isSunday(d: Date): boolean {
+  return d.getDay() === 0;
+}
 function isSundayDateKey(isoDay: string): boolean {
   const d = new Date(`${isoDay}T00:00:00`);
   return d.getDay() === 0;
@@ -302,12 +305,14 @@ export default function PdksPage() {
             if (end > start) outside += end - start;
           }
           let lunch = Math.max(0, FULL_LUNCH_MIN - outside);
+          // Cumartesi/Pazar icin farkli ogle kurali.
           if (isWeekend(date) && gross < WEEKEND_LUNCH_EXEMPT_THRESHOLD_MIN) lunch = 0;
           const net = Math.max(0, gross - lunch);
 
           let expected = 0;
           const md = mdKey(date);
-          if (!isWeekend(date) && !FULL_HOLIDAYS.has(md)) {
+          // Calisma gunleri: Pazartesi-Cumartesi. Pazar calisma beklenmez.
+          if (!isSunday(date) && !FULL_HOLIDAYS.has(md)) {
             expected = HALF_HOLIDAYS.has(md) ? HALF_DAY_TARGET_MIN : DAILY_TARGET_MIN;
             const mazeret = normalizeText(mazeretMap.get(`${normalizeText(personel)}__${dayKey}`) || "");
             if (["izin", "rapor", "tatil", "dis", "dış"].includes(mazeret)) expected = 0;
@@ -380,6 +385,11 @@ export default function PdksPage() {
     });
     return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [selectedDaily]);
+
+  const previewCleanRecords = useMemo(() => {
+    if (!selectedPerson) return cleanRecords.slice(0, 20);
+    return cleanRecords.filter((r) => r.personel === selectedPerson).slice(0, 20);
+  }, [cleanRecords, selectedPerson]);
 
   return (
     <div className="min-h-screen bg-slate-50 p-5 text-slate-900">
@@ -460,9 +470,11 @@ export default function PdksPage() {
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="text-lg font-semibold">Ilk 20 Temiz Kayit</h2>
+          <h2 className="text-lg font-semibold">
+            Ilk 20 Temiz Kayit{selectedPerson ? ` - ${selectedPerson}` : ""}
+          </h2>
           <pre className="mt-2 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
-{["personel,giris,cikis", ...cleanRecords.slice(0, 20).map((r) => `${r.personel},${fmtISODateTime(r.giris)},${fmtISODateTime(r.cikis)}`)].join("\n")}
+{["personel,giris,cikis", ...previewCleanRecords.map((r) => `${r.personel},${fmtISODateTime(r.giris)},${fmtISODateTime(r.cikis)}`)].join("\n")}
           </pre>
         </section>
       </div>
