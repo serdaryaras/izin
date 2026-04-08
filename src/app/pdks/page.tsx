@@ -71,6 +71,11 @@ function minutesToHHMM(total: number): string {
   const m = abs % 60;
   return `${sign}${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
+function minutesToSignedHHMM(total: number): string {
+  const base = minutesToHHMM(total);
+  if (total > 0) return `+${base}`;
+  return base;
+}
 function hhmmToMinutes(text: string): number {
   if (!text) return 0;
   const sign = text.startsWith("-") ? -1 : 1;
@@ -767,6 +772,12 @@ export default function PdksPage() {
     }
     return rows;
   }, [dailyRows, takvimPersonel, takvimAy]);
+  const takvimAyToplami = useMemo(() => {
+    if (!takvimPersonel || !takvimAy) return 0;
+    return dailyRows
+      .filter((r) => r.personel === takvimPersonel && r.tarih.startsWith(takvimAy))
+      .reduce((sum, r) => sum + hhmmToMinutes(r.bakiye), 0);
+  }, [dailyRows, takvimPersonel, takvimAy]);
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
       <div className="mx-auto max-w-[1300px] space-y-5">
@@ -993,7 +1004,14 @@ export default function PdksPage() {
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight">Kisi Bazli Aylik Bakiye Takvimi</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold tracking-tight">Kisi Bazli Aylik Bakiye Takvimi</h2>
+            <div className={`rounded-lg px-3 py-1 text-sm font-semibold ${
+              takvimAyToplami < 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+            }`}>
+              Ay Toplami: {minutesToSignedHHMM(takvimAyToplami)}
+            </div>
+          </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <select
               className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
