@@ -196,7 +196,6 @@ export default function PdksPage() {
   const [allMovements, setAllMovements] = useState<MovementRow[]>([]);
   const [deletedMovementIds, setDeletedMovementIds] = useState<string[]>([]);
 
-  const [selectedPerson, setSelectedPerson] = useState("");
   const [manualMovements, setManualMovements] = useState<MovementRow[]>([]);
   const [manualForm, setManualForm] = useState({
     personel: "",
@@ -204,11 +203,6 @@ export default function PdksPage() {
     saat: "",
     durum: "G" as "G" | "C",
   });
-
-  const personOptions = useMemo(
-    () => [...new Set(dailyRows.map((r) => r.personel))].sort((a, b) => a.localeCompare(b, "tr")),
-    [dailyRows],
-  );
 
   async function processAll() {
     setNotice("");
@@ -581,8 +575,20 @@ export default function PdksPage() {
     void processAll();
   }, [manualMovements, deletedMovementIds]);
 
-  const selectedDaily = useMemo(() => dailyRows.filter((r) => r.personel === selectedPerson), [dailyRows, selectedPerson]);
-  const selectedWeekly = useMemo(() => weeklyRows.filter((r) => r.personel === selectedPerson), [weeklyRows, selectedPerson]);
+  const faultyDays = useMemo(() => {
+    const map = new Map<string, { personel: string; tarih: string; reasons: Set<string>; count: number }>();
+    unmatchedRows.forEach((r) => {
+      const tarih = r.tarih_saat.split(" ")[0] || "";
+      const key = `${normalizeText(r.personel)}__${tarih}`;
+      if (!map.has(key)) {
+        map.set(key, { personel: r.personel, tarih, reasons: new Set<string>(), count: 0 });
+      }
+      const item = map.get(key)!;
+      item.reasons.add(r.neden);
+      item.count += 1;
+    });
+    return [...map.values()].sort((a, b) => (a.personel === b.personel ? a.tarih.localeCompare(b.tarih) : a.personel.localeCompare(b.personel, "tr")));
+  }, [unmatchedRows]);
   const selectedFormDayMovements = useMemo(() => {
     const personel = manualForm.personel.trim();
     const tarih = manualForm.tarih;
@@ -591,31 +597,12 @@ export default function PdksPage() {
       .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
       .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
   }, [allMovements, manualForm.personel, manualForm.tarih]);
-  const selectedMonthly = useMemo(() => {
-    const map = new Map<string, { net: number; expected: number }>();
-    selectedDaily.forEach((r) => {
-      const key = r.tarih.slice(0, 7);
-      if (!map.has(key)) map.set(key, { net: 0, expected: 0 });
-      map.get(key)!.net += hhmmToMinutes(r.net);
-      map.get(key)!.expected += hhmmToMinutes(r.beklenen);
-    });
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [selectedDaily]);
-
-  const previewCleanRecords = useMemo(() => {
-    if (!selectedPerson) return cleanRecords;
-    return cleanRecords.filter((r) => r.personel === selectedPerson);
-  }, [cleanRecords, selectedPerson]);
-
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
       <div className="mx-auto max-w-[1300px] space-y-5">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-bold tracking-tight">PDKS - Puantaj Raporu</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Ham PDKS dosyasini okuyup gunluk-haftalik denge hesaplar. Mazeretler mevcut uygulamadaki
-            Supabase kayitlarindan cekilir.
-          </p>
+          <p className="mt-2 text-sm text-slate-500">Bu ekranda sadece hatali gunleri tespit edip, secili gun kayitlarini duzeltebilirsiniz.</p>
           <div className="mt-4 grid gap-4 md:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ham PDKS Dosyasi</p>
@@ -626,8 +613,8 @@ export default function PdksPage() {
               }} />
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Eslesen Cift</p>
-              <div className="mt-2 text-3xl font-bold tracking-tight">{pairCount}</div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Eslesmeyen Kayit</p>
+              <div className="mt-2 text-3xl font-bold tracking-tight">{unmatchedRows.length}</div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Personel / Mazeret</p>
@@ -639,6 +626,44 @@ export default function PdksPage() {
           </div>
           {notice ? <div className="mt-3 rounded-lg bg-emerald-50 p-3 text-emerald-700">{notice}</div> : null}
           {error ? <div className="mt-3 rounded-lg bg-rose-50 p-3 text-rose-700">{error}</div> : null}
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold tracking-tight">Hatali Gunler</h2>
+          <p className="mt-1 text-sm text-slate-500">Sadece eslesmeyen veri olan personel ve gunler listelenir.</p>
+          <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className="border-b p-2 text-left">Personel</th>
+                  <th className="border-b p-2 text-left">Gun</th>
+                  <th className="border-b p-2 text-right">Islem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {faultyDays.length === 0 ? (
+                  <tr>
+                    <td className="p-2 text-slate-500" colSpan={3}>Hatali gun bulunamadi.</td>
+                  </tr>
+                ) : (
+                  faultyDays.map((d, idx) => (
+                    <tr key={`${d.personel}-${d.tarih}-${idx}`}>
+                      <td className="border-b p-2">{d.personel}</td>
+                      <td className="border-b p-2">{d.tarih}</td>
+                      <td className="border-b p-2 text-right">
+                        <button
+                          className="rounded-md border border-sky-200 px-2 py-1 text-sky-700 hover:bg-sky-50"
+                          onClick={() => setManualForm((prev) => ({ ...prev, personel: d.personel, tarih: d.tarih }))}
+                        >
+                          Duzenle
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -721,149 +746,8 @@ export default function PdksPage() {
             </div>
           </div>
 
-          <div className="mt-3 max-h-48 overflow-auto rounded-xl border border-slate-200">
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-slate-50">
-                <tr>
-                  <th className="border-b p-2 text-left">Personel</th>
-                  <th className="border-b p-2 text-left">Tarih Saat</th>
-                  <th className="border-b p-2 text-left">Durum</th>
-                  <th className="border-b p-2 text-right">Islem</th>
-                </tr>
-              </thead>
-              <tbody>
-                {manualMovements.length === 0 ? (
-                  <tr>
-                    <td className="p-2 text-slate-500" colSpan={4}>Eklenen manuel hareket yok.</td>
-                  </tr>
-                ) : (
-                  manualMovements.map((m, idx) => (
-                    <tr key={`${m.personel}-${m.datetime.toISOString()}-${idx}`}>
-                      <td className="border-b p-2">{m.personel}</td>
-                      <td className="border-b p-2">{fmtISODateTime(m.datetime)}</td>
-                      <td className="border-b p-2">{m.durum}</td>
-                      <td className="border-b p-2 text-right">
-                        <button className="rounded-md border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50" onClick={() => removeManualMovement(idx)}>
-                          Sil
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight">Eslesmeyen Hareketler</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Giris-cikis eslesmesi olmayan satirlari gosterir. Bu kayitlari yukaridaki "Ek Hareket Tanimla" ile tamamlayabilirsiniz.
-          </p>
-          <div className="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-200">
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-slate-50">
-                <tr>
-                  <th className="border-b p-2 text-left">Personel</th>
-                  <th className="border-b p-2 text-left">Tarih Saat</th>
-                  <th className="border-b p-2 text-left">Durum</th>
-                  <th className="border-b p-2 text-left">Neden</th>
-                  <th className="border-b p-2 text-right">Aksiyon</th>
-                </tr>
-              </thead>
-              <tbody>
-                {unmatchedRows.length === 0 ? (
-                  <tr>
-                    <td className="p-2 text-slate-500" colSpan={5}>Eslesmeyen hareket yok.</td>
-                  </tr>
-                ) : (
-                  unmatchedRows.map((r, idx) => (
-                    <tr key={`${r.personel}-${r.tarih_saat}-${r.durum}-${idx}`}>
-                      <td className="border-b p-2">{r.personel}</td>
-                      <td className="border-b p-2">{r.tarih_saat}</td>
-                      <td className="border-b p-2">{r.durum}</td>
-                      <td className="border-b p-2">{r.neden}</td>
-                      <td className="border-b p-2 text-right">
-                        <button
-                          className="rounded-md border border-sky-200 px-2 py-1 text-sky-700 hover:bg-sky-50"
-                          onClick={() => prefillManualFormFromUnmatched(r)}
-                        >
-                          Duzelt
-                        </button>
-                        <button
-                          className="ml-2 rounded-md border border-emerald-200 px-2 py-1 text-emerald-700 hover:bg-emerald-50"
-                          onClick={() => quickFixFromUnmatched(r)}
-                        >
-                          Duzelt + Ekle
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight">Secili Personel Kontrol Paneli</h2>
-          <select className="mt-3 w-full rounded-xl border border-slate-300 bg-white p-2.5 text-sm md:w-[420px]" value={selectedPerson} onChange={(e) => setSelectedPerson(e.target.value)}>
-            <option value="">Personel secin</option>
-            {personOptions.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 p-3">
-              <h3 className="mb-2 font-semibold">Gunluk</h3>
-              <div className="max-h-80 overflow-auto text-xs">
-                <table className="w-full border-collapse">
-                  <thead className="sticky top-0 bg-slate-50"><tr><th className="border-b p-1.5 text-left">Tarih</th><th className="border-b p-1.5 text-right">Net</th><th className="border-b p-1.5 text-right">Beklenen</th><th className="border-b p-1.5 text-right">Bakiye</th><th className="border-b p-1.5 text-left">Durum</th></tr></thead>
-                  <tbody>
-                    {selectedDaily.map((r) => (
-                      <tr key={`${r.personel}-${r.tarih}`} className={isSundayDateKey(r.tarih) ? "bg-red-50" : ""}>
-                        <td className="border-b p-1.5">{r.tarih}</td>
-                        <td className="border-b p-1.5 text-right">{r.net}</td>
-                        <td className="border-b p-1.5 text-right">{r.beklenen}</td>
-                        <td className="border-b p-1.5 text-right font-medium">{r.bakiye}</td>
-                        <td className="border-b p-1.5">{r.durum || "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            <div className="rounded-xl border border-slate-200 p-3">
-              <h3 className="mb-2 font-semibold">Haftalik</h3>
-              <div className="max-h-80 overflow-auto text-xs">
-                <table className="w-full border-collapse">
-                  <thead className="sticky top-0 bg-slate-50"><tr><th className="border-b p-1.5 text-left">Hafta</th><th className="border-b p-1.5 text-right">Net</th><th className="border-b p-1.5 text-right">Beklenen</th><th className="border-b p-1.5 text-right">Bakiye</th></tr></thead>
-                  <tbody>
-                    {selectedWeekly.map((r) => <tr key={`${r.personel}-${r.hafta}`}><td className="border-b p-1.5">{r.hafta_etiket}</td><td className="border-b p-1.5 text-right">{r.haftalik_net}</td><td className="border-b p-1.5 text-right">{r.haftalik_beklenen}</td><td className="border-b p-1.5 text-right font-medium">{r.haftalik_bakiye}</td></tr>)}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-          <div className="mt-4 rounded-xl border border-slate-200 p-3">
-            <h3 className="mb-2 font-semibold">Aylik Ozet</h3>
-            <div className="max-h-64 overflow-auto text-xs">
-              <table className="w-full border-collapse">
-                <thead className="sticky top-0 bg-slate-50"><tr><th className="border-b p-1.5 text-left">Ay</th><th className="border-b p-1.5 text-right">Net</th><th className="border-b p-1.5 text-right">Beklenen</th><th className="border-b p-1.5 text-right">Bakiye</th></tr></thead>
-                <tbody>
-                  {selectedMonthly.map(([ay, v]) => <tr key={ay}><td className="border-b p-1.5">{ay}</td><td className="border-b p-1.5 text-right">{minutesToHHMM(v.net)}</td><td className="border-b p-1.5 text-right">{minutesToHHMM(v.expected)}</td><td className="border-b p-1.5 text-right font-medium">{minutesToHHMM(v.net - v.expected)}</td></tr>)}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">
-            Temiz Kayitlar{selectedPerson ? ` - ${selectedPerson}` : " (Tum Personeller)"}
-          </h2>
-          <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
-{["personel,giris,cikis", ...previewCleanRecords.map((r) => `${r.personel},${fmtISODateTime(r.giris)},${fmtISODateTime(r.cikis)}`)].join("\n")}
-          </pre>
-        </section>
       </div>
     </div>
   );
