@@ -1118,7 +1118,7 @@ export default function PdksPage() {
                             ) : (
                               <span className={`inline-block w-full text-center text-[10px] font-semibold ${
                                 hareketYokCalismaGunu
-                                  ? "text-rose-800"
+                                  ? "text-rose-200"
                                   : bakiyeMin < 0
                                     ? "text-rose-700"
                                     : "text-emerald-700"
