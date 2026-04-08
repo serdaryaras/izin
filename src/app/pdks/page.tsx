@@ -231,7 +231,6 @@ export default function PdksPage() {
     saat: "",
     durum: "G" as "G" | "C",
   });
-  const [takvimPersonel, setTakvimPersonel] = useState("");
   const [takvimAy, setTakvimAy] = useState("");
 
   async function processAll() {
@@ -745,14 +744,6 @@ export default function PdksPage() {
     return [...set].sort((a, b) => a.localeCompare(b, "tr"));
   }, [dailyRows]);
   useEffect(() => {
-    if (personOptions.length === 0) {
-      if (takvimPersonel) setTakvimPersonel("");
-      return;
-    }
-    if (takvimPersonel && personOptions.includes(takvimPersonel)) return;
-    setTakvimPersonel(personOptions[0]);
-  }, [personOptions, takvimPersonel]);
-  useEffect(() => {
     if (monthOptions.length === 0) {
       if (takvimAy) setTakvimAy("");
       return;
@@ -760,44 +751,41 @@ export default function PdksPage() {
     if (takvimAy && monthOptions.includes(takvimAy)) return;
     setTakvimAy(monthOptions[monthOptions.length - 1]);
   }, [monthOptions, takvimAy]);
-  const takvimHaftalar = useMemo(() => {
-    if (!takvimPersonel || !takvimAy) return [] as Array<{ gunler: string[]; haftaToplam: number }>;
-    const personDaily = new Map(
-      dailyRows
-        .filter((r) => r.personel === takvimPersonel && r.tarih.startsWith(takvimAy))
-        .map((r) => [r.tarih, hhmmToMinutes(r.bakiye)]),
-    );
+  const takvimGunleri = useMemo(() => {
+    if (!takvimAy) return [] as string[];
     const [y, m] = takvimAy.split("-").map(Number);
     if (!y || !m) return [];
-    const first = new Date(y, m - 1, 1);
-    const last = new Date(y, m, 0);
-    const firstWeekStart = new Date(first);
-    const firstDay = firstWeekStart.getDay();
-    firstWeekStart.setDate(firstWeekStart.getDate() + (firstDay === 0 ? -6 : 1 - firstDay));
-    const lastWeekEnd = new Date(last);
-    const lastDay = lastWeekEnd.getDay();
-    lastWeekEnd.setDate(lastWeekEnd.getDate() + (lastDay === 0 ? 0 : 7 - lastDay));
-    const rows: Array<{ gunler: string[]; haftaToplam: number }> = [];
-    for (let ws = new Date(firstWeekStart); ws <= lastWeekEnd; ws.setDate(ws.getDate() + 7)) {
-      const gunler: string[] = [];
-      let toplam = 0;
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(ws);
-        d.setDate(d.getDate() + i);
-        const iso = fmtDateKey(d);
-        gunler.push(iso);
-        toplam += personDaily.get(iso) ?? 0;
-      }
-      rows.push({ gunler, haftaToplam: toplam });
-    }
-    return rows;
-  }, [dailyRows, takvimPersonel, takvimAy]);
-  const takvimAyToplami = useMemo(() => {
-    if (!takvimPersonel || !takvimAy) return 0;
-    return dailyRows
-      .filter((r) => r.personel === takvimPersonel && r.tarih.startsWith(takvimAy))
-      .reduce((sum, r) => sum + hhmmToMinutes(r.bakiye), 0);
-  }, [dailyRows, takvimPersonel, takvimAy]);
+    const lastDay = new Date(y, m, 0).getDate();
+    return Array.from({ length: lastDay }, (_, i) => `${takvimAy}-${String(i + 1).padStart(2, "0")}`);
+  }, [takvimAy]);
+  const takvimPersoneller = useMemo(() => {
+    if (!takvimAy) return personOptions;
+    const set = new Set(personOptions);
+    Object.keys(leaveDayStatusMap).forEach((k) => {
+      const [pNorm, day] = k.split("__");
+      if (!day?.startsWith(takvimAy)) return;
+      const found = personOptions.find((p) => normalizeText(p) === pNorm);
+      if (found) set.add(found);
+    });
+    return [...set].sort((a, b) => a.localeCompare(b, "tr"));
+  }, [personOptions, leaveDayStatusMap, takvimAy]);
+  const dailyByPersonDay = useMemo(() => {
+    const map = new Map<string, DailyRow>();
+    dailyRows.forEach((r) => map.set(`${normalizeText(r.personel)}__${r.tarih}`, r));
+    return map;
+  }, [dailyRows]);
+  const aylikBakiyeListesi = useMemo(() => {
+    if (!takvimAy) return [] as Array<{ personel: string; toplam: number }>;
+    const map = new Map<string, number>();
+    takvimPersoneller.forEach((p) => map.set(p, 0));
+    dailyRows.forEach((r) => {
+      if (!r.tarih.startsWith(takvimAy)) return;
+      map.set(r.personel, (map.get(r.personel) ?? 0) + hhmmToMinutes(r.bakiye));
+    });
+    return [...map.entries()]
+      .map(([personel, toplam]) => ({ personel, toplam }))
+      .sort((a, b) => a.personel.localeCompare(b.personel, "tr"));
+  }, [dailyRows, takvimAy, takvimPersoneller]);
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
       <div className="mx-auto max-w-[1300px] space-y-5">
@@ -951,22 +939,9 @@ export default function PdksPage() {
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold tracking-tight">Kisi Bazli Aylik Bakiye Takvimi</h2>
-            <div className={`rounded-lg px-3 py-1 text-sm font-semibold ${
-              takvimAyToplami < 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
-            }`}>
-              Ay Toplami: {minutesToSignedHHMM(takvimAyToplami)}
-            </div>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <select
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
-              value={takvimPersonel}
-              onChange={(e) => setTakvimPersonel(e.target.value)}
-            >
-              {personOptions.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
+          <h2 className="text-lg font-semibold tracking-tight">Aylik Mesai Bakiye Karti</h2>
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-xs text-slate-500">Ay:</span>
             <select
               className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
               value={takvimAy}
@@ -975,74 +950,72 @@ export default function PdksPage() {
               {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
-          <div className="mt-3 overflow-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2">
-            <table className="w-full border-separate border-spacing-1 text-xs">
-              <thead className="sticky top-0 z-10 bg-slate-100">
+          <div className="mt-3 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-50">
                 <tr>
-                  <th className="rounded-lg border border-slate-200 bg-slate-900 p-2 text-left text-white">Hafta</th>
-                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Pzt</th>
-                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Sal</th>
-                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Car</th>
-                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Per</th>
-                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Cum</th>
-                  <th className="rounded-lg border border-slate-200 bg-amber-50 p-2 text-left">Cmt</th>
-                  <th className="rounded-lg border border-slate-200 bg-rose-50 p-2 text-left">Paz</th>
-                  <th className="rounded-lg border border-slate-200 bg-slate-900 p-2 text-right text-white">Hafta Toplami</th>
+                  <th className="border-b p-2 text-left">Calisan</th>
+                  {takvimGunleri.map((iso) => <th key={iso} className="border-b p-1 text-center">{Number(iso.slice(8, 10))}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {takvimHaftalar.length === 0 ? (
+                {takvimPersoneller.length === 0 ? (
                   <tr>
-                    <td className="p-2 text-slate-500" colSpan={9}>Takvim verisi yok.</td>
+                    <td className="p-2 text-slate-500" colSpan={Math.max(2, takvimGunleri.length + 1)}>Takvim verisi yok.</td>
                   </tr>
                 ) : (
-                  takvimHaftalar.map((h, idx) => (
-                    <tr key={`${takvimPersonel}-${takvimAy}-${idx}`}>
-                      <td className="min-w-[92px] rounded-lg border border-slate-200 bg-slate-900 p-2 text-sm font-semibold text-white">
-                        {idx + 1}. Hafta
-                      </td>
-                      {h.gunler.map((iso, dayIdx) => {
-                        const ayDisi = !iso.startsWith(takvimAy);
-                        const er = employmentRanges[normalizeText(takvimPersonel)];
+                  takvimPersoneller.map((p) => (
+                    <tr key={`${takvimAy}-${p}`}>
+                      <td className="border-b p-2 font-medium">{p}</td>
+                      {takvimGunleri.map((iso) => {
+                        const er = employmentRanges[normalizeText(p)];
                         const calismaDisi = !!er && ((er.ise ? iso < er.ise : false) || (er.ayrilis ? iso > er.ayrilis : false));
-                        const row = dailyRows.find((r) => r.personel === takvimPersonel && r.tarih === iso);
-                        const mapKey = `${normalizeText(takvimPersonel)}__${iso}`;
-                        const leaveDurum = leaveDayStatusMap[mapKey] || "";
+                        const row = dailyByPersonDay.get(`${normalizeText(p)}__${iso}`);
+                        const leaveDurum = leaveDayStatusMap[`${normalizeText(p)}__${iso}`] || "";
                         const holidayDurum = holidayDayTypeMap[iso] === "full" ? "resmi tatil" : holidayDayTypeMap[iso] === "half" ? "arefe" : "";
                         const cellDurum = row?.durum || leaveDurum || holidayDurum;
                         const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
-                        const weekend = dayIdx >= 5;
-                        const durumGolge = cellDurum ? getTakvimGunGolgeClass(cellDurum) : "";
                         return (
                           <td
-                            key={iso}
-                            className={`min-w-[108px] rounded-lg border p-2 align-top ${
-                              ayDisi
-                                ? "border-slate-200 bg-slate-100 text-slate-400"
-                                : calismaDisi
-                                  ? "border-slate-200 bg-slate-100 text-slate-300"
-                                : weekend
-                                  ? "border-slate-200 bg-slate-50"
-                                  : "border-slate-200 bg-white"
-                            } ${!ayDisi ? durumGolge : ""}`}
+                            key={`${p}-${iso}`}
+                            className={`border-b p-1 text-center ${calismaDisi ? "bg-slate-100 text-slate-300" : getTakvimGunGolgeClass(cellDurum)}`}
+                            title={cellDurum || ""}
                           >
-                            <div className="text-[10px] font-semibold">{iso.slice(8, 10)}</div>
-                            <div className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
-                              !row || calismaDisi
-                                ? "bg-slate-100 text-slate-500"
-                                : bakiyeMin < 0
-                                  ? "bg-rose-100 text-rose-700"
-                                  : "bg-emerald-100 text-emerald-700"
-                            }`}>
-                              {row && !calismaDisi ? row.bakiye : ""}
-                            </div>
+                            {row && !calismaDisi ? (
+                              <span className={bakiyeMin < 0 ? "text-rose-700" : "text-emerald-700"}>{row.bakiye}</span>
+                            ) : ""}
                           </td>
                         );
                       })}
-                      <td className={`min-w-[118px] rounded-lg border p-2 text-right text-sm font-bold ${
-                        h.haftaToplam < 0 ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                      }`}>
-                        {minutesToHHMM(h.haftaToplam)}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold tracking-tight">Aylik Bakiye Listesi</h2>
+          <div className="mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className="border-b p-2 text-left">Calisan</th>
+                  <th className="border-b p-2 text-right">Aylik Bakiye (+/-)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {aylikBakiyeListesi.length === 0 ? (
+                  <tr>
+                    <td className="p-2 text-slate-500" colSpan={2}>Liste yok.</td>
+                  </tr>
+                ) : (
+                  aylikBakiyeListesi.map((r) => (
+                    <tr key={`${takvimAy}-${r.personel}`}>
+                      <td className="border-b p-2">{r.personel}</td>
+                      <td className={`border-b p-2 text-right font-semibold ${r.toplam < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                        {minutesToSignedHHMM(r.toplam)}
                       </td>
                     </tr>
                   ))
