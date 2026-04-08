@@ -158,6 +158,13 @@ export default function PdksPage() {
   const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
 
   const [selectedPerson, setSelectedPerson] = useState("");
+  const [manualMovements, setManualMovements] = useState<Array<{ personel: string; datetime: Date; durum: "G" | "C" }>>([]);
+  const [manualForm, setManualForm] = useState({
+    personel: "",
+    tarih: "",
+    saat: "",
+    durum: "G" as "G" | "C",
+  });
 
   const personOptions = useMemo(
     () => [...new Set(dailyRows.map((r) => r.personel))].sort((a, b) => a.localeCompare(b, "tr")),
@@ -236,6 +243,9 @@ export default function PdksPage() {
           parseMovementRows(rows);
         });
       }
+
+      // Manuel eklenen hareketleri de ham akisa dahil et.
+      movements.push(...manualMovements);
 
       // Pair G-C
       const byPerson = new Map<string, Array<{ datetime: Date; durum: "G" | "C" }>>();
@@ -385,6 +395,40 @@ export default function PdksPage() {
     }
   }
 
+  function addManualMovement() {
+    const personel = manualForm.personel.trim();
+    if (!personel) {
+      setError("Manuel hareket icin personel gerekli.");
+      return;
+    }
+    if (!manualForm.tarih || !manualForm.saat) {
+      setError("Manuel hareket icin tarih ve saat gerekli.");
+      return;
+    }
+    const dt = new Date(`${manualForm.tarih}T${manualForm.saat}:00`);
+    if (Number.isNaN(dt.getTime())) {
+      setError("Manuel hareket tarihi/saati gecersiz.");
+      return;
+    }
+    const duplicate = manualMovements.some(
+      (m) => normalizeText(m.personel) === normalizeText(personel)
+        && m.datetime.getTime() === dt.getTime()
+        && m.durum === manualForm.durum,
+    );
+    if (duplicate) {
+      setError("Ayni personel, tarih-saat ve durum icin manuel hareket zaten var.");
+      return;
+    }
+    setError("");
+    setManualMovements((prev) => [...prev, { personel, datetime: dt, durum: manualForm.durum }]);
+    setManualForm((prev) => ({ ...prev, saat: "" }));
+    setNotice("Manuel hareket eklendi. Hesapla ile dahil edilir.");
+  }
+
+  function removeManualMovement(index: number) {
+    setManualMovements((prev) => prev.filter((_, i) => i !== index));
+  }
+
   const selectedDaily = useMemo(() => dailyRows.filter((r) => r.personel === selectedPerson), [dailyRows, selectedPerson]);
   const selectedWeekly = useMemo(() => weeklyRows.filter((r) => r.personel === selectedPerson), [weeklyRows, selectedPerson]);
   const selectedMonthly = useMemo(() => {
@@ -431,6 +475,74 @@ export default function PdksPage() {
           </div>
           {notice ? <div className="mt-3 rounded-lg bg-emerald-50 p-3 text-emerald-700">{notice}</div> : null}
           {error ? <div className="mt-3 rounded-lg bg-rose-50 p-3 text-rose-700">{error}</div> : null}
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold tracking-tight">Ek Hareket Tanimla</h2>
+          <p className="mt-1 text-sm text-slate-500">Eksik/yanlis PDKS satirlarini manuel ekleyip hesaplamaya katabilirsiniz.</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-5">
+            <input
+              className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
+              placeholder="Personel"
+              value={manualForm.personel}
+              onChange={(e) => setManualForm((prev) => ({ ...prev, personel: e.target.value }))}
+            />
+            <input
+              className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
+              type="date"
+              value={manualForm.tarih}
+              onChange={(e) => setManualForm((prev) => ({ ...prev, tarih: e.target.value }))}
+            />
+            <input
+              className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
+              type="time"
+              value={manualForm.saat}
+              onChange={(e) => setManualForm((prev) => ({ ...prev, saat: e.target.value }))}
+            />
+            <select
+              className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
+              value={manualForm.durum}
+              onChange={(e) => setManualForm((prev) => ({ ...prev, durum: e.target.value as "G" | "C" }))}
+            >
+              <option value="G">Giris (G)</option>
+              <option value="C">Cikis (C)</option>
+            </select>
+            <button className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50" onClick={addManualMovement}>
+              Hareket Ekle
+            </button>
+          </div>
+          <div className="mt-3 max-h-48 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className="border-b p-2 text-left">Personel</th>
+                  <th className="border-b p-2 text-left">Tarih Saat</th>
+                  <th className="border-b p-2 text-left">Durum</th>
+                  <th className="border-b p-2 text-right">Islem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {manualMovements.length === 0 ? (
+                  <tr>
+                    <td className="p-2 text-slate-500" colSpan={4}>Manuel hareket yok.</td>
+                  </tr>
+                ) : (
+                  manualMovements.map((m, idx) => (
+                    <tr key={`${m.personel}-${m.datetime.toISOString()}-${idx}`}>
+                      <td className="border-b p-2">{m.personel}</td>
+                      <td className="border-b p-2">{fmtISODateTime(m.datetime)}</td>
+                      <td className="border-b p-2">{m.durum}</td>
+                      <td className="border-b p-2 text-right">
+                        <button className="rounded-md border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50" onClick={() => removeManualMovement(idx)}>
+                          Sil
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
