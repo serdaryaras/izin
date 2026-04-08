@@ -195,6 +195,7 @@ export default function PdksPage() {
   const [unmatchedRows, setUnmatchedRows] = useState<UnmatchedRow[]>([]);
   const [allMovements, setAllMovements] = useState<MovementRow[]>([]);
   const [deletedMovementIds, setDeletedMovementIds] = useState<string[]>([]);
+  const [recalcVersion, setRecalcVersion] = useState(0);
 
   const [manualMovements, setManualMovements] = useState<MovementRow[]>([]);
   const [manualForm, setManualForm] = useState({
@@ -494,6 +495,7 @@ export default function PdksPage() {
     if (!target) return;
     setManualMovements((prev) => prev.filter((_, i) => i !== index));
     setAllMovements((prev) => prev.filter((m) => m.id !== target.id));
+    setRecalcVersion((v) => v + 1);
   }
 
   function addManualMovementFromValues(personelRaw: string, tarih: string, saat: string, durum: "G" | "C"): boolean {
@@ -530,6 +532,7 @@ export default function PdksPage() {
     };
     setManualMovements((prev) => [...prev, movement]);
     setAllMovements((prev) => [...prev, movement]);
+    setRecalcVersion((v) => v + 1);
     return true;
   }
 
@@ -566,6 +569,7 @@ export default function PdksPage() {
       setDeletedMovementIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
     }
     setAllMovements((prev) => prev.filter((m) => m.id !== row.id));
+    setRecalcVersion((v) => v + 1);
     setNotice("Hareket listeden silindi.");
     setError("");
   }
@@ -573,7 +577,7 @@ export default function PdksPage() {
   useEffect(() => {
     if (!pdksFile) return;
     void processAll();
-  }, [manualMovements, deletedMovementIds]);
+  }, [pdksFile, recalcVersion]);
 
   const faultyDays = useMemo(() => {
     const map = new Map<string, { personel: string; tarih: string; reasons: Set<string>; count: number }>();
@@ -595,8 +599,7 @@ export default function PdksPage() {
     if (!personel || !tarih) return [];
     return allMovements
       .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
-      .sort((a, b) => a.datetime.getTime() - b.datetime.getTime())
-      .slice(0, 30);
+      .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
   }, [allMovements, manualForm.personel, manualForm.tarih]);
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
@@ -710,7 +713,7 @@ export default function PdksPage() {
                 Listelenmesi icin Personel ve Tarih secin.
               </div>
             ) : null}
-            <div className="max-h-48 overflow-auto">
+            <div className="max-h-[70vh] overflow-auto">
               <table className="w-full border-collapse text-xs">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
