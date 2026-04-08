@@ -975,7 +975,7 @@ export default function PdksPage() {
               {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
-          <div className="mt-3 overflow-hidden rounded-xl">
+          <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-slate-400">
             <div className="overflow-auto">
             <table className="w-full table-fixed border-collapse text-xs">
               <colgroup>
