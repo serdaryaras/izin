@@ -94,11 +94,11 @@ function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: tru
   }
   if (typeof value === "string") {
     const t = value.trim();
-    let m = t.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/);
+    let m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if (m) return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
-    m = t.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
     if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
-    m = t.match(/^(\d{2}):(\d{2})(?::(\d{2}))?$/);
+    m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if (m) return { timeOnly: true, h: +m[1], m: +m[2], s: +(m[3] || 0) };
     m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
