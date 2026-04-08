@@ -1106,7 +1106,7 @@ export default function PdksPage() {
                               calismaDisiVeKayitYok
                                 ? "bg-slate-100 text-slate-300"
                                 : hareketYokCalismaGunu
-                                  ? "bg-rose-200"
+                                  ? "bg-red-300"
                                   : cellBg
                             }`}
                             title={hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : (cellDurum || "")}
@@ -1118,7 +1118,7 @@ export default function PdksPage() {
                             ) : (
                               <span className={`inline-block w-full text-center text-[10px] font-semibold ${
                                 hareketYokCalismaGunu
-                                  ? "text-rose-200"
+                                  ? "text-red-300"
                                   : bakiyeMin < 0
                                     ? "text-rose-700"
                                     : "text-emerald-700"
