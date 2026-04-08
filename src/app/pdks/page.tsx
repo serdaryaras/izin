@@ -1040,14 +1040,14 @@ export default function PdksPage() {
                   <th className="sticky left-0 z-10 border border-slate-400 bg-white px-1.5 py-1 text-left text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">Calisan</th>
                   {takvimGunleri.map((iso) => {
                     const d = new Date(`${iso}T00:00:00`);
-                    const isPazar = d.getDay() === 0;
+                    const isHaftaSonu = d.getDay() === 0 || d.getDay() === 6;
                     const holiday = holidayDayTypeMap[iso];
                     const bg =
                       holiday === "full"
                         ? "bg-slate-200"
                         : holiday === "half"
                           ? "bg-amber-100"
-                          : isPazar
+                          : isHaftaSonu
                             ? "bg-rose-100"
                             : "bg-white";
                     return (
@@ -1081,8 +1081,9 @@ export default function PdksPage() {
                         const brutMin = row ? hhmmToMinutes(row.brut) : 0;
                         const d = new Date(`${iso}T00:00:00`);
                         const isPazar = d.getDay() === 0;
+                        const isCumartesi = d.getDay() === 6;
                         const holidayType = holidayDayTypeMap[iso];
-                        const nonWorkingDay = isPazar || holidayType === "full" || holidayType === "half";
+                        const nonWorkingDay = isPazar || isCumartesi || holidayType === "full" || holidayType === "half";
                         const noWorkOnNonWorkingDay = nonWorkingDay && brutMin <= 0;
                         const bakiyeText = row && !noWorkOnNonWorkingDay ? row.bakiye : "";
                         const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
@@ -1093,7 +1094,7 @@ export default function PdksPage() {
                             ? "bg-slate-200"
                             : holiday === "half"
                               ? "bg-amber-100"
-                              : isPazar
+                              : isPazar || isCumartesi
                                 ? "bg-rose-100"
                                 : "bg-white";
                         return (
