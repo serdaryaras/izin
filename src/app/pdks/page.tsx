@@ -21,6 +21,7 @@ type WeeklyRow = {
   haftalik_net: string;
   haftalik_beklenen: string;
   haftalik_bakiye: string;
+  haftalik_fazla_mesai: string;
 };
 type UnmatchedRow = {
   personel: string;
@@ -38,13 +39,12 @@ type MovementRow = {
 
 const DAILY_TARGET_MIN = 8 * 60 + 30;
 const HALF_DAY_TARGET_MIN = DAILY_TARGET_MIN / 2;
-const LUNCH_START_MIN = 11 * 60 + 30;
+const LUNCH_START_MIN = 11 * 60;
 const LUNCH_END_MIN = 14 * 60 + 30;
 const FULL_LUNCH_MIN = 60;
-const WEEKEND_LUNCH_EXEMPT_THRESHOLD_MIN = 4 * 60 + 30;
+const WEEKEND_LUNCH_ZERO_MAX_MIN = 4 * 60 + 15;
+const WEEKEND_LUNCH_HALF_MAX_MIN = 8 * 60;
 const MAX_SHIFT_MIN = 18 * 60;
-const FULL_HOLIDAYS = new Set(["01-01", "04-23", "05-01", "05-19", "07-15", "08-30", "10-29"]);
-const HALF_HOLIDAYS = new Set(["10-28"]);
 
 function normalizeText(value: unknown): string {
   if (value == null) return "";
@@ -107,6 +107,24 @@ function dedupeExactSameDirectionMovements(list: MovementRow[]): MovementRow[] {
     out.push(m);
   });
   return out;
+}
+function addDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return fmtDateKey(d);
+}
+function holidayTypeFromRow(row: Record<string, unknown>): "full" | "half" {
+  const raw = normalizeText(row.tur ?? row.tip ?? row.type ?? row.ad ?? row.aciklama ?? "");
+  if (raw.includes("yarim") || raw.includes("yarım") || raw.includes("arefe")) return "half";
+  return "full";
+}
+function holidayDateFromRow(row: Record<string, unknown>): string | null {
+  const raw = String(row.tarih ?? row.date ?? row.gun ?? "").trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const m = raw.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
 }
 
 function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: true; h: number; m: number; s: number } {
@@ -355,12 +373,14 @@ export default function PdksPage() {
 
       // Mazeret map from existing app data (Supabase izinler + personel)
       const mazeretMap = new Map<string, string>();
+      const holidayMap = new Map<string, "full" | "half">();
       if (hasSupabaseEnv) {
         try {
           const sb = getSupabaseClient();
-          const [{ data: personeller }, { data: izinler }] = await Promise.all([
+          const [{ data: personeller }, { data: izinler }, resmiRes] = await Promise.all([
             sb.from("personel").select("id,ad"),
             sb.from("izinler").select("personel_id,izin_tipi,baslangic,bitis"),
+            sb.from("resmi_tatil_gunleri").select("*"),
           ]);
           const personelAdById = new Map((personeller ?? []).map((p) => [p.id, p.ad]));
           (izinler ?? []).forEach((i) => {
@@ -371,6 +391,30 @@ export default function PdksPage() {
             for (let d = new Date(from); d.getTime() <= to.getTime(); d.setDate(d.getDate() + 1)) {
               mazeretMap.set(`${normalizeText(ad)}__${fmtDateKey(d)}`, i.izin_tipi);
             }
+          });
+          const allHolidayRows = ([...(resmiRes.data ?? [])] as Record<string, unknown>[]);
+          const diniFullDays: string[] = [];
+          allHolidayRows.forEach((row) => {
+            const iso = holidayDateFromRow(row);
+            if (!iso) return;
+            const type = holidayTypeFromRow(row);
+            if (!holidayMap.has(iso) || holidayMap.get(iso) !== "full") holidayMap.set(iso, type);
+            const rawText = normalizeText(row.tur ?? row.tip ?? row.type ?? row.ad ?? row.aciklama ?? "");
+            if (type === "full" && (rawText.includes("dini") || rawText.includes("ramazan") || rawText.includes("kurban"))) {
+              diniFullDays.push(iso);
+            }
+          });
+          // Dini tatillerin bir gun oncesi arefe: yarim gun.
+          diniFullDays.forEach((iso) => {
+            const prev = addDays(iso, -1);
+            if (holidayMap.get(prev) !== "full") holidayMap.set(prev, "half");
+          });
+          // 29 Ekim oncesi yarim gun.
+          [...holidayMap.entries()].forEach(([iso, type]) => {
+            if (type !== "full") return;
+            if (iso.slice(5) !== "10-29") return;
+            const prev = addDays(iso, -1);
+            if (holidayMap.get(prev) !== "full") holidayMap.set(prev, "half");
           });
         } catch {
           // Mazeret okunamasa da duzeltme ekraninin hesaplari devam etsin.
@@ -384,6 +428,9 @@ export default function PdksPage() {
         if (!byP.has(p.personel)) byP.set(p.personel, []);
         byP.get(p.personel)!.push(p);
       });
+      const sortedAllDays = [...new Set(dedupedMovements.map((m) => fmtDateKey(m.datetime)))].sort();
+      const minDay = sortedAllDays[0] ?? "";
+      const maxDay = sortedAllDays[sortedAllDays.length - 1] ?? "";
       const dRows: DailyRow[] = [];
       const wRows: WeeklyRow[] = [];
       [...byP.entries()].forEach(([personel, recs]) => {
@@ -393,10 +440,16 @@ export default function PdksPage() {
           if (!byDay.has(key)) byDay.set(key, []);
           byDay.get(key)!.push(r);
         });
-        const weeks = new Map<string, { net: number; expected: number }>();
-        [...byDay.keys()].sort().forEach((dayKey) => {
+        const weeks = new Map<string, { net: number; expected: number; etiket: string }>();
+        const iterateDays: string[] = [];
+        if (minDay && maxDay) {
+          for (let d = new Date(`${minDay}T00:00:00`); fmtDateKey(d) <= maxDay; d.setDate(d.getDate() + 1)) {
+            iterateDays.push(fmtDateKey(d));
+          }
+        }
+        iterateDays.forEach((dayKey) => {
           const date = new Date(dayKey + "T00:00:00");
-          const intervals = byDay.get(dayKey)!;
+          const intervals = byDay.get(dayKey) ?? [];
           const sorted = intervals.slice().sort((a, b) => a.giris.getTime() - b.giris.getTime());
           let gross = 0;
           sorted.forEach((x) => (gross += Math.round((x.cikis.getTime() - x.giris.getTime()) / 60000)));
@@ -408,18 +461,24 @@ export default function PdksPage() {
             const end = Math.min(nextStart, LUNCH_END_MIN);
             if (end > start) outside += end - start;
           }
-          let lunch = Math.max(0, FULL_LUNCH_MIN - outside);
-          // Cumartesi/Pazar icin farkli ogle kurali.
-          if (isWeekend(date) && gross < WEEKEND_LUNCH_EXEMPT_THRESHOLD_MIN) lunch = 0;
+          let lunch = 0;
+          if (isWeekend(date)) {
+            if (gross <= WEEKEND_LUNCH_ZERO_MAX_MIN) lunch = 0;
+            else if (gross <= WEEKEND_LUNCH_HALF_MAX_MIN) lunch = 30;
+            else lunch = FULL_LUNCH_MIN;
+          } else {
+            lunch = Math.max(0, FULL_LUNCH_MIN - outside);
+          }
           const net = Math.max(0, gross - lunch);
 
           let expected = 0;
-          const md = mdKey(date);
-          // Beklenen calisma: Pazartesi-Cuma. Cumartesi/Pazar zorunlu degil.
-          if (!isSunday(date) && !isSaturday(date) && !FULL_HOLIDAYS.has(md)) {
-            expected = HALF_HOLIDAYS.has(md) ? HALF_DAY_TARGET_MIN : DAILY_TARGET_MIN;
+          if (!isSunday(date) && !isSaturday(date)) {
+            const holiday = holidayMap.get(dayKey);
+            if (holiday === "full") expected = 0;
+            else expected = holiday === "half" ? HALF_DAY_TARGET_MIN : DAILY_TARGET_MIN;
             const mazeret = normalizeText(mazeretMap.get(`${normalizeText(personel)}__${dayKey}`) || "");
-            if (["izin", "rapor", "tatil", "dis", "dış"].includes(mazeret)) expected = 0;
+            // Izinler tablosunda kaydi olan tum mazeret/izin gunlerinde beklenen calisma sifirlanir.
+            if (mazeret) expected = 0;
           }
 
           const ws = new Date(date);
@@ -430,7 +489,7 @@ export default function PdksPage() {
           we.setDate(we.getDate() + 6);
           const haftaKey = fmtDateKey(ws);
           const haftaEtiket = `${fmtDateKey(ws)} / ${fmtDateKey(we)}`;
-          if (!weeks.has(haftaKey)) weeks.set(haftaKey, { net: 0, expected: 0 });
+          if (!weeks.has(haftaKey)) weeks.set(haftaKey, { net: 0, expected: 0, etiket: haftaEtiket });
           weeks.get(haftaKey)!.net += net;
           weeks.get(haftaKey)!.expected += expected;
 
@@ -444,25 +503,19 @@ export default function PdksPage() {
             bakiye: minutesToHHMM(net - expected),
             durum: mazeretMap.get(`${normalizeText(personel)}__${dayKey}`) || "",
           });
-          if (!wRows.find((w) => w.personel === personel && w.hafta === haftaKey)) {
-            wRows.push({
-              personel,
-              hafta: haftaKey,
-              hafta_etiket: haftaEtiket,
-              haftalik_net: "00:00",
-              haftalik_beklenen: "00:00",
-              haftalik_bakiye: "00:00",
-            });
-          }
         });
 
-        wRows.forEach((w) => {
-          if (w.personel !== personel) return;
-          const agg = weeks.get(w.hafta);
-          if (!agg) return;
-          w.haftalik_net = minutesToHHMM(agg.net);
-          w.haftalik_beklenen = minutesToHHMM(agg.expected);
-          w.haftalik_bakiye = minutesToHHMM(agg.net - agg.expected);
+        [...weeks.entries()].forEach(([hafta, agg]) => {
+          const bakiye = agg.net - agg.expected;
+          wRows.push({
+            personel,
+            hafta,
+            hafta_etiket: agg.etiket,
+            haftalik_net: minutesToHHMM(agg.net),
+            haftalik_beklenen: minutesToHHMM(agg.expected),
+            haftalik_bakiye: minutesToHHMM(bakiye),
+            haftalik_fazla_mesai: minutesToHHMM(Math.max(0, bakiye)),
+          });
         });
       });
 
@@ -668,6 +721,43 @@ export default function PdksPage() {
                           Duzenle
                         </button>
                       </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold tracking-tight">Haftalik Calisma ve Fazla Mesai</h2>
+          <p className="mt-1 text-sm text-slate-500">Pazartesi baslangicli hafta toplamlari: net, beklenen ve fazla mesai.</p>
+          <div className="mt-3 max-h-80 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className="border-b p-2 text-left">Personel</th>
+                  <th className="border-b p-2 text-left">Hafta</th>
+                  <th className="border-b p-2 text-right">Net</th>
+                  <th className="border-b p-2 text-right">Beklenen</th>
+                  <th className="border-b p-2 text-right">Bakiye</th>
+                  <th className="border-b p-2 text-right">Fazla Mesai</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weeklyRows.length === 0 ? (
+                  <tr>
+                    <td className="p-2 text-slate-500" colSpan={6}>Haftalik sonuc yok.</td>
+                  </tr>
+                ) : (
+                  weeklyRows.map((r) => (
+                    <tr key={`${r.personel}-${r.hafta}`}>
+                      <td className="border-b p-2">{r.personel}</td>
+                      <td className="border-b p-2">{r.hafta_etiket}</td>
+                      <td className="border-b p-2 text-right">{r.haftalik_net}</td>
+                      <td className="border-b p-2 text-right">{r.haftalik_beklenen}</td>
+                      <td className="border-b p-2 text-right">{r.haftalik_bakiye}</td>
+                      <td className="border-b p-2 text-right font-semibold">{r.haftalik_fazla_mesai}</td>
                     </tr>
                   ))
                 )}
