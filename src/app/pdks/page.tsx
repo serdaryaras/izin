@@ -242,10 +242,6 @@ export default function PdksPage() {
     saat: "",
     durum: "G" as "G" | "C",
   });
-  const [sorguForm, setSorguForm] = useState({
-    personel: "",
-    tarih: "",
-  });
   const [takvimAy, setTakvimAy] = useState("");
 
   async function processAll() {
@@ -748,14 +744,14 @@ export default function PdksPage() {
       .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
       .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
   }, [allMovements, manualForm.personel, manualForm.tarih]);
-  const sorguGunHareketleri = useMemo(() => {
-    const personel = sorguForm.personel.trim();
-    const tarih = sorguForm.tarih;
-    if (!personel || !tarih) return [];
-    return allMovements
-      .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
-      .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
-  }, [allMovements, sorguForm.personel, sorguForm.tarih]);
+  const personelSecenekleri = useMemo(() => {
+    const set = new Set<string>();
+    allMovements.forEach((m) => {
+      const ad = m.personel.trim();
+      if (ad) set.add(ad);
+    });
+    return [...set].sort((a, b) => a.localeCompare(b, "tr"));
+  }, [allMovements]);
   const monthOptions = useMemo(() => {
     const set = new Set<string>();
     dailyRows.forEach((r) => set.add(r.tarih.slice(0, 7)));
@@ -879,62 +875,22 @@ export default function PdksPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold tracking-tight">Ek Hareket Tanimla</h2>
           <p className="mt-1 text-sm text-slate-500">Eksik/yanlis PDKS satirlarini manuel ekleyip hesaplamaya katabilirsiniz.</p>
-          <div className="mt-3 rounded-xl border border-slate-200 p-3">
-            <div className="mb-2 text-sm font-semibold text-slate-700">Hareket Sorgula (Normalize Sonrasi)</div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <input
-                className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
-                placeholder="Personel"
-                value={sorguForm.personel}
-                onChange={(e) => setSorguForm((prev) => ({ ...prev, personel: e.target.value }))}
-              />
-              <input
-                className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
-                type="date"
-                value={sorguForm.tarih}
-                onChange={(e) => setSorguForm((prev) => ({ ...prev, tarih: e.target.value }))}
-              />
-              <button
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
-                onClick={() => setManualForm((prev) => ({ ...prev, personel: sorguForm.personel, tarih: sorguForm.tarih }))}
-              >
-                Duzenleme Alanina Aktar
-              </button>
-            </div>
-            <div className="mt-3 overflow-visible">
-              <table className="w-full border-collapse text-xs">
-                <thead className="sticky top-0 bg-slate-50">
-                  <tr>
-                    <th className="border-b p-2 text-left">Personel</th>
-                    <th className="border-b p-2 text-left">Tarih Saat</th>
-                    <th className="border-b p-2 text-left">Durum</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sorguForm.personel.trim() && sorguForm.tarih && sorguGunHareketleri.length === 0 ? (
-                    <tr>
-                      <td className="p-2 text-slate-500" colSpan={3}>Bu kisi ve gun icin hareket yok.</td>
-                    </tr>
-                  ) : (
-                    sorguGunHareketleri.map((m, idx) => (
-                      <tr key={`${m.id}-${idx}-sorgu`}>
-                        <td className="border-b p-2">{m.personel}</td>
-                        <td className="border-b p-2">{fmtISODateTime(m.datetime)}</td>
-                        <td className="border-b p-2">{m.durum}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
           <div className="mt-3 grid gap-3 md:grid-cols-5">
-            <input
+            <select
               className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
-              placeholder="Personel"
               value={manualForm.personel}
               onChange={(e) => setManualForm((prev) => ({ ...prev, personel: e.target.value }))}
-            />
+            >
+              <option value="">Personel secin</option>
+              {manualForm.personel && !personelSecenekleri.includes(manualForm.personel) ? (
+                <option value={manualForm.personel}>{manualForm.personel}</option>
+              ) : null}
+              {personelSecenekleri.map((p) => (
+                <option key={`manual-${p}`} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
             <input
               className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
               type="date"
