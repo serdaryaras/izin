@@ -368,21 +368,25 @@ export default function PdksPage() {
       // Mazeret map from existing app data (Supabase izinler + personel)
       const mazeretMap = new Map<string, string>();
       if (hasSupabaseEnv) {
-        const sb = getSupabaseClient();
-        const [{ data: personeller }, { data: izinler }] = await Promise.all([
-          sb.from("personel").select("id,ad"),
-          sb.from("izinler").select("personel_id,izin_tipi,baslangic,bitis"),
-        ]);
-        const personelAdById = new Map((personeller ?? []).map((p) => [p.id, p.ad]));
-        (izinler ?? []).forEach((i) => {
-          const ad = personelAdById.get(i.personel_id);
-          if (!ad) return;
-          const from = new Date(i.baslangic + "T00:00:00");
-          const to = new Date(i.bitis + "T00:00:00");
-          for (let d = new Date(from); d.getTime() <= to.getTime(); d.setDate(d.getDate() + 1)) {
-            mazeretMap.set(`${normalizeText(ad)}__${fmtDateKey(d)}`, i.izin_tipi);
-          }
-        });
+        try {
+          const sb = getSupabaseClient();
+          const [{ data: personeller }, { data: izinler }] = await Promise.all([
+            sb.from("personel").select("id,ad"),
+            sb.from("izinler").select("personel_id,izin_tipi,baslangic,bitis"),
+          ]);
+          const personelAdById = new Map((personeller ?? []).map((p) => [p.id, p.ad]));
+          (izinler ?? []).forEach((i) => {
+            const ad = personelAdById.get(i.personel_id);
+            if (!ad) return;
+            const from = new Date(i.baslangic + "T00:00:00");
+            const to = new Date(i.bitis + "T00:00:00");
+            for (let d = new Date(from); d.getTime() <= to.getTime(); d.setDate(d.getDate() + 1)) {
+              mazeretMap.set(`${normalizeText(ad)}__${fmtDateKey(d)}`, i.izin_tipi);
+            }
+          });
+        } catch {
+          // Mazeret okunamasa da duzeltme ekraninin hesaplari devam etsin.
+        }
       }
       const nextMazeretCount = mazeretMap.size;
 
