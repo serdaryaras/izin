@@ -1087,6 +1087,8 @@ export default function PdksPage() {
                         const noWorkOnNonWorkingDay = nonWorkingDay && brutMin <= 0;
                         const bakiyeText = row && !noWorkOnNonWorkingDay ? row.bakiye : "";
                         const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
+                        const beklenenMin = row ? hhmmToMinutes(row.beklenen) : 0;
+                        const hareketYokCalismaGunu = !!row && beklenenMin > 0 && brutMin <= 0 && !leaveCode;
                         const calismaDisiVeKayitYok = calismaDisi && !row;
                         const holiday = holidayType;
                         const cellBg =
@@ -1100,15 +1102,27 @@ export default function PdksPage() {
                         return (
                           <td
                             key={`${p}-${iso}`}
-                            className={`h-7 min-w-0 border border-slate-400 p-0 align-middle ${calismaDisiVeKayitYok ? "bg-slate-100 text-slate-300" : cellBg}`}
-                            title={cellDurum || ""}
+                            className={`h-7 min-w-0 border border-slate-400 p-0 align-middle ${
+                              calismaDisiVeKayitYok
+                                ? "bg-slate-100 text-slate-300"
+                                : hareketYokCalismaGunu
+                                  ? "bg-rose-200"
+                                  : cellBg
+                            }`}
+                            title={hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : (cellDurum || "")}
                           >
                             {leaveCode ? (
                               <span className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm text-[10px] font-bold leading-none tracking-tight ${getTakvimGunGolgeClass(cellDurum)}`}>
                                 {leaveCode}
                               </span>
                             ) : (
-                              <span className={`inline-block w-full text-center text-[10px] font-semibold ${bakiyeMin < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                              <span className={`inline-block w-full text-center text-[10px] font-semibold ${
+                                hareketYokCalismaGunu
+                                  ? "text-rose-800"
+                                  : bakiyeMin < 0
+                                    ? "text-rose-700"
+                                    : "text-emerald-700"
+                              }`}>
                                 {calismaDisiVeKayitYok ? "" : bakiyeText}
                               </span>
                             )}
