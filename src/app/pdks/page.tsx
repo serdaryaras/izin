@@ -797,6 +797,11 @@ export default function PdksPage() {
       .map(([personel, toplam]) => ({ personel, toplam }))
       .sort((a, b) => a.personel.localeCompare(b.personel, "tr"));
   }, [dailyRows, takvimAy, takvimPersoneller]);
+  const aylikToplamByPersonel = useMemo(() => {
+    const map = new Map<string, number>();
+    aylikBakiyeListesi.forEach((r) => map.set(r.personel, r.toplam));
+    return map;
+  }, [aylikBakiyeListesi]);
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
       <div className="mx-auto max-w-[1300px] space-y-5">
@@ -961,15 +966,16 @@ export default function PdksPage() {
               {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
-          <div className="mt-3 overflow-auto rounded-xl border border-slate-200">
+          <div className="mt-3 overflow-auto rounded-xl border border-slate-400">
             <table className="w-full table-fixed border-collapse text-xs">
               <colgroup>
                 <col style={{ width: "10rem" }} />
                 {takvimGunleri.map((d) => <col key={d} />)}
+                <col style={{ width: "6.5rem" }} />
               </colgroup>
               <thead className="sticky top-0 bg-slate-50">
                 <tr>
-                  <th className="sticky left-0 z-10 border bg-white px-1.5 py-1 text-left text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">Calisan</th>
+                  <th className="sticky left-0 z-10 border border-slate-400 bg-white px-1.5 py-1 text-left text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">Calisan</th>
                   {takvimGunleri.map((iso) => {
                     const d = new Date(`${iso}T00:00:00`);
                     const isPazar = d.getDay() === 0;
@@ -983,11 +989,12 @@ export default function PdksPage() {
                             ? "bg-rose-100"
                             : "bg-white";
                     return (
-                      <th key={iso} className={`border p-0.5 text-center text-[10px] font-medium leading-none ${bg}`}>
+                      <th key={iso} className={`border border-slate-400 p-0.5 text-center text-[10px] font-medium leading-none ${bg}`}>
                         {Number(iso.slice(8, 10))}
                       </th>
                     );
                   })}
+                  <th className="border border-slate-400 bg-white p-0.5 text-center text-[10px] font-semibold leading-none">Ay Toplami</th>
                 </tr>
               </thead>
               <tbody>
@@ -998,7 +1005,7 @@ export default function PdksPage() {
                 ) : (
                   takvimPersoneller.map((p) => (
                     <tr key={`${takvimAy}-${p}`}>
-                      <td className="sticky left-0 z-10 overflow-hidden border bg-white px-1.5 py-0.5 align-middle shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                      <td className="sticky left-0 z-10 overflow-hidden border border-slate-400 bg-white px-1.5 py-0.5 align-middle shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">
                         <div className="truncate text-xs font-medium leading-tight" title={p}>{p}</div>
                       </td>
                       {takvimGunleri.map((iso) => {
@@ -1025,7 +1032,7 @@ export default function PdksPage() {
                         return (
                           <td
                             key={`${p}-${iso}`}
-                            className={`h-7 min-w-0 border p-0 align-middle ${calismaDisi ? "bg-slate-100 text-slate-300" : cellBg}`}
+                            className={`h-7 min-w-0 border border-slate-400 p-0 align-middle ${calismaDisi ? "bg-slate-100 text-slate-300" : cellBg}`}
                             title={cellDurum || ""}
                           >
                             {!calismaDisi && leaveCode ? (
@@ -1040,6 +1047,11 @@ export default function PdksPage() {
                           </td>
                         );
                       })}
+                      <td className={`border border-slate-400 p-0.5 text-right text-[10px] font-semibold ${
+                        (aylikToplamByPersonel.get(p) ?? 0) < 0 ? "text-rose-700" : "text-emerald-700"
+                      }`}>
+                        {minutesToSignedHHMM(aylikToplamByPersonel.get(p) ?? 0)}
+                      </td>
                     </tr>
                   ))
                 )}
