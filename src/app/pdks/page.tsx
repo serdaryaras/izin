@@ -201,7 +201,6 @@ export default function PdksPage() {
   const [unmatchedRows, setUnmatchedRows] = useState<UnmatchedRow[]>([]);
   const [allMovements, setAllMovements] = useState<MovementRow[]>([]);
   const [importedRawMovements, setImportedRawMovements] = useState<MovementRow[]>([]);
-  const [deletedMovementIds, setDeletedMovementIds] = useState<string[]>([]);
   const [recalcVersion, setRecalcVersion] = useState(0);
   const calcRunRef = useRef(0);
 
@@ -300,8 +299,7 @@ export default function PdksPage() {
 
       // Manuel eklenen hareketleri de ham akisa dahil et.
       const movements = [...rawMovements, ...manualMovements];
-      const activeMovements = movements.filter((m) => !deletedMovementIds.includes(m.id));
-      const dedupedMovements = dedupeExactSameDirectionMovements(activeMovements);
+      const dedupedMovements = dedupeExactSameDirectionMovements(movements);
       const nextAllMovements = dedupedMovements.slice().sort((a, b) => {
         if (a.personel !== b.personel) return a.personel.localeCompare(b.personel, "tr");
         return a.datetime.getTime() - b.datetime.getTime();
@@ -309,7 +307,7 @@ export default function PdksPage() {
 
       // Pair G-C
       const byPerson = new Map<string, Array<{ datetime: Date; durum: "G" | "C" }>>();
-      dedupedMovements.forEach((m) => {
+      nextAllMovements.forEach((m) => {
         if (!byPerson.has(m.personel)) byPerson.set(m.personel, []);
         byPerson.get(m.personel)!.push({ datetime: m.datetime, durum: m.durum });
       });
@@ -379,11 +377,14 @@ export default function PdksPage() {
         try {
           const sb = getSupabaseClient();
           const [{ data: personeller }, { data: izinler }, resmiRes] = await Promise.all([
-            sb.from("personel").select("id,ad"),
+            sb.from("personel").select("id,ad,ise_giris,ayrilis_tarihi"),
             sb.from("izinler").select("personel_id,izin_tipi,baslangic,bitis"),
             sb.from("resmi_tatil_gunleri").select("*"),
           ]);
           const personelAdById = new Map((personeller ?? []).map((p) => [p.id, p.ad]));
+          const personelCalismaAraligi = new Map(
+            (personeller ?? []).map((p) => [normalizeText(p.ad), { ise: p.ise_giris, ayrilis: p.ayrilis_tarihi ?? null }]),
+          );
           (izinler ?? []).forEach((i) => {
             const ad = personelAdById.get(i.personel_id);
             if (!ad) return;
@@ -417,6 +418,15 @@ export default function PdksPage() {
             const prev = addDays(iso, -1);
             if (holidayMap.get(prev) !== "full") holidayMap.set(prev, "half");
           });
+          const withinEmployment = (personelAd: string, dayIso: string) => {
+            const r = personelCalismaAraligi.get(normalizeText(personelAd));
+            if (!r) return true;
+            if (r.ise && dayIso < r.ise) return false;
+            if (r.ayrilis && dayIso > r.ayrilis) return false;
+            return true;
+          };
+          const filtered = nextAllMovements.filter((m) => withinEmployment(m.personel, fmtDateKey(m.datetime)));
+          nextAllMovements.splice(0, nextAllMovements.length, ...filtered);
         } catch {
           // Mazeret okunamasa da duzeltme ekraninin hesaplari devam etsin.
         }
@@ -429,7 +439,7 @@ export default function PdksPage() {
         if (!byP.has(p.personel)) byP.set(p.personel, []);
         byP.get(p.personel)!.push(p);
       });
-      const sortedAllDays = [...new Set(dedupedMovements.map((m) => fmtDateKey(m.datetime)))].sort();
+      const sortedAllDays = [...new Set(nextAllMovements.map((m) => fmtDateKey(m.datetime)))].sort();
       const minDay = sortedAllDays[0] ?? "";
       const maxDay = sortedAllDays[sortedAllDays.length - 1] ?? "";
       const dRows: DailyRow[] = [];
@@ -624,7 +634,7 @@ export default function PdksPage() {
     if (row.source === "manual") {
       setManualMovements((prev) => prev.filter((m) => m.id !== row.id));
     } else {
-      setDeletedMovementIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+      setImportedRawMovements((prev) => prev.filter((m) => m.id !== row.id));
     }
     setAllMovements((prev) => prev.filter((m) => m.id !== row.id));
     setRecalcVersion((v) => v + 1);
@@ -705,7 +715,6 @@ export default function PdksPage() {
               <input className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" type="file" accept=".csv,.xls,.xlsx" onChange={(e) => {
                 setPdksFile(e.target.files?.[0] ?? null);
                 setImportedRawMovements([]);
-                setDeletedMovementIds([]);
                 setAllMovements([]);
                 setManualMovements([]);
               }} />
