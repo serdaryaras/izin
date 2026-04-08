@@ -1010,42 +1010,64 @@ export default function PdksPage() {
               {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
-          <div className="mt-3 overflow-auto rounded-xl border border-slate-200">
-            <table className="w-full border-collapse text-xs">
-              <thead className="bg-slate-50">
+          <div className="mt-3 overflow-auto rounded-xl border border-slate-200 bg-slate-50/50 p-2">
+            <table className="w-full border-separate border-spacing-1 text-xs">
+              <thead className="sticky top-0 z-10 bg-slate-100">
                 <tr>
-                  <th className="border-b p-2 text-left">Pzt</th>
-                  <th className="border-b p-2 text-left">Sal</th>
-                  <th className="border-b p-2 text-left">Car</th>
-                  <th className="border-b p-2 text-left">Per</th>
-                  <th className="border-b p-2 text-left">Cum</th>
-                  <th className="border-b p-2 text-left">Cmt</th>
-                  <th className="border-b p-2 text-left">Paz</th>
-                  <th className="border-b p-2 text-right">Hafta Toplami</th>
+                  <th className="rounded-lg border border-slate-200 bg-slate-900 p-2 text-left text-white">Hafta</th>
+                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Pzt</th>
+                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Sal</th>
+                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Car</th>
+                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Per</th>
+                  <th className="rounded-lg border border-slate-200 bg-white p-2 text-left">Cum</th>
+                  <th className="rounded-lg border border-slate-200 bg-amber-50 p-2 text-left">Cmt</th>
+                  <th className="rounded-lg border border-slate-200 bg-rose-50 p-2 text-left">Paz</th>
+                  <th className="rounded-lg border border-slate-200 bg-slate-900 p-2 text-right text-white">Hafta Toplami</th>
                 </tr>
               </thead>
               <tbody>
                 {takvimHaftalar.length === 0 ? (
                   <tr>
-                    <td className="p-2 text-slate-500" colSpan={8}>Takvim verisi yok.</td>
+                    <td className="p-2 text-slate-500" colSpan={9}>Takvim verisi yok.</td>
                   </tr>
                 ) : (
                   takvimHaftalar.map((h, idx) => (
                     <tr key={`${takvimPersonel}-${takvimAy}-${idx}`}>
-                      {h.gunler.map((iso) => {
+                      <td className="min-w-[92px] rounded-lg border border-slate-200 bg-slate-900 p-2 text-sm font-semibold text-white">
+                        {idx + 1}. Hafta
+                      </td>
+                      {h.gunler.map((iso, dayIdx) => {
                         const ayDisi = !iso.startsWith(takvimAy);
                         const row = dailyRows.find((r) => r.personel === takvimPersonel && r.tarih === iso);
                         const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
+                        const weekend = dayIdx >= 5;
                         return (
-                          <td key={iso} className={`border-b p-2 align-top ${ayDisi ? "bg-slate-50 text-slate-400" : ""}`}>
-                            <div className="text-[10px]">{iso.slice(8, 10)}</div>
-                            <div className={`font-semibold ${bakiyeMin < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                          <td
+                            key={iso}
+                            className={`min-w-[108px] rounded-lg border p-2 align-top ${
+                              ayDisi
+                                ? "border-slate-200 bg-slate-100 text-slate-400"
+                                : weekend
+                                  ? "border-slate-200 bg-slate-50"
+                                  : "border-slate-200 bg-white"
+                            }`}
+                          >
+                            <div className="text-[10px] font-semibold">{iso.slice(8, 10)}</div>
+                            <div className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
+                              !row
+                                ? "bg-slate-100 text-slate-500"
+                                : bakiyeMin < 0
+                                  ? "bg-rose-100 text-rose-700"
+                                  : "bg-emerald-100 text-emerald-700"
+                            }`}>
                               {row ? row.bakiye : "--:--"}
                             </div>
                           </td>
                         );
                       })}
-                      <td className={`border-b p-2 text-right font-semibold ${h.haftaToplam < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                      <td className={`min-w-[118px] rounded-lg border p-2 text-right text-sm font-bold ${
+                        h.haftaToplam < 0 ? "border-rose-200 bg-rose-50 text-rose-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      }`}>
                         {minutesToHHMM(h.haftaToplam)}
                       </td>
                     </tr>
