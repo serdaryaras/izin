@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getSupabaseClient, hasSupabaseEnv, type Tables } from "@/lib/supabase";
 
 type PairRecord = { personel: string; giris: Date; cikis: Date };
@@ -43,6 +43,7 @@ const LUNCH_END_MIN = 14 * 60 + 30;
 const FULL_LUNCH_MIN = 60;
 const WEEKEND_LUNCH_EXEMPT_THRESHOLD_MIN = 4 * 60 + 30;
 const MAX_SHIFT_MIN = 18 * 60;
+const SAME_STATUS_KEEP_LAST_WINDOW_MIN = 15;
 const FULL_HOLIDAYS = new Set(["01-01", "04-23", "05-01", "05-19", "07-15", "08-30", "10-29"]);
 const HALF_HOLIDAYS = new Set(["10-28"]);
 
@@ -96,6 +97,28 @@ function mdKey(d: Date): string {
 }
 function minutesOfDay(d: Date): number {
   return d.getHours() * 60 + d.getMinutes();
+}
+function collapseNearSequentialByStatus<T extends { datetime: Date; durum: "G" | "C" }>(list: T[]): T[] {
+  const out: T[] = [];
+  list.forEach((curr) => {
+    const prev = out[out.length - 1];
+    if (!prev) {
+      out.push(curr);
+      return;
+    }
+    if (prev.durum !== curr.durum) {
+      out.push(curr);
+      return;
+    }
+    const diffMin = Math.round((curr.datetime.getTime() - prev.datetime.getTime()) / 60000);
+    // 15 dk icindeki ayni durum ardishik kayitlarda son kayit esas alinir.
+    if (diffMin >= 0 && diffMin <= SAME_STATUS_KEEP_LAST_WINDOW_MIN) {
+      out[out.length - 1] = curr;
+      return;
+    }
+    out.push(curr);
+  });
+  return out;
 }
 
 function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: true; h: number; m: number; s: number } {
@@ -285,8 +308,9 @@ export default function PdksPage() {
       const unmatched: UnmatchedRow[] = [];
       [...byPerson.entries()].forEach(([personel, list]) => {
         list.sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
+        const normalized = collapseNearSequentialByStatus(list);
         let open: Date | null = null;
-        list.forEach((x) => {
+        normalized.forEach((x) => {
           if (x.durum === "G") {
             // Coklu giris gelirse onceki acik giris eslesememis sayilir.
             if (open) {
@@ -468,7 +492,7 @@ export default function PdksPage() {
     const ok = addManualMovementFromValues(personel, manualForm.tarih, manualForm.saat, manualForm.durum);
     if (!ok) return;
     setManualForm((prev) => ({ ...prev, saat: "" }));
-    setNotice("Manuel hareket eklendi. Hesapla ile dahil edilir.");
+    setNotice("Manuel hareket eklendi.");
   }
 
   function removeManualMovement(index: number) {
@@ -538,7 +562,7 @@ export default function PdksPage() {
       saat,
       durum: hedefDurum,
     });
-    setNotice("Duzelt + Ekle tamamlandi. Hesapla ile sonuca dahil edilir.");
+    setNotice("Duzelt + Ekle tamamlandi.");
   }
 
   function removeMovementFromDayList(row: MovementRow) {
@@ -548,9 +572,14 @@ export default function PdksPage() {
       setDeletedMovementIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
     }
     setAllMovements((prev) => prev.filter((m) => m.id !== row.id));
-    setNotice("Hareket listeden silindi. Hesaplama sonucuna yansitmak icin Hesapla'ya basin.");
+    setNotice("Hareket listeden silindi.");
     setError("");
   }
+
+  useEffect(() => {
+    if (!pdksFile) return;
+    void processAll();
+  }, [manualMovements, deletedMovementIds]);
 
   const selectedDaily = useMemo(() => dailyRows.filter((r) => r.personel === selectedPerson), [dailyRows, selectedPerson]);
   const selectedWeekly = useMemo(() => weeklyRows.filter((r) => r.personel === selectedPerson), [weeklyRows, selectedPerson]);
