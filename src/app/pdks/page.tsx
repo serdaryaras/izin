@@ -28,6 +28,13 @@ type UnmatchedRow = {
   durum: "G" | "C";
   neden: string;
 };
+type MovementRow = {
+  id: string;
+  source: "raw" | "manual";
+  personel: string;
+  datetime: Date;
+  durum: "G" | "C";
+};
 
 const DAILY_TARGET_MIN = 8 * 60 + 30;
 const HALF_DAY_TARGET_MIN = DAILY_TARGET_MIN / 2;
@@ -163,9 +170,11 @@ export default function PdksPage() {
   const [dailyRows, setDailyRows] = useState<DailyRow[]>([]);
   const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
   const [unmatchedRows, setUnmatchedRows] = useState<UnmatchedRow[]>([]);
+  const [allMovements, setAllMovements] = useState<MovementRow[]>([]);
+  const [deletedMovementIds, setDeletedMovementIds] = useState<string[]>([]);
 
   const [selectedPerson, setSelectedPerson] = useState("");
-  const [manualMovements, setManualMovements] = useState<Array<{ personel: string; datetime: Date; durum: "G" | "C" }>>([]);
+  const [manualMovements, setManualMovements] = useState<MovementRow[]>([]);
   const [manualForm, setManualForm] = useState({
     personel: "",
     tarih: "",
@@ -187,7 +196,8 @@ export default function PdksPage() {
       const buf = await pdksFile.arrayBuffer();
       const ext = (pdksFile.name.split(".").pop() || "").toLowerCase();
 
-      let movements: Array<{ personel: string; datetime: Date; durum: "G" | "C" }> = [];
+      let rawSeq = 0;
+      let movements: MovementRow[] = [];
 
       const parseMovementRows = (rows: any[][]) => {
         let headerIdx = -1;
@@ -231,7 +241,13 @@ export default function PdksPage() {
             dt = d;
           }
           if (!dt) continue;
-          movements.push({ personel: p, datetime: dt, durum: s as "G" | "C" });
+          movements.push({
+            id: `raw-${rawSeq++}`,
+            source: "raw",
+            personel: p,
+            datetime: dt,
+            durum: s as "G" | "C",
+          });
         }
       };
 
@@ -253,10 +269,15 @@ export default function PdksPage() {
 
       // Manuel eklenen hareketleri de ham akisa dahil et.
       movements.push(...manualMovements);
+      const activeMovements = movements.filter((m) => !deletedMovementIds.includes(m.id));
+      setAllMovements(activeMovements.slice().sort((a, b) => {
+        if (a.personel !== b.personel) return a.personel.localeCompare(b.personel, "tr");
+        return a.datetime.getTime() - b.datetime.getTime();
+      }));
 
       // Pair G-C
       const byPerson = new Map<string, Array<{ datetime: Date; durum: "G" | "C" }>>();
-      movements.forEach((m) => {
+      activeMovements.forEach((m) => {
         if (!byPerson.has(m.personel)) byPerson.set(m.personel, []);
         byPerson.get(m.personel)!.push({ datetime: m.datetime, durum: m.durum });
       });
@@ -451,7 +472,10 @@ export default function PdksPage() {
   }
 
   function removeManualMovement(index: number) {
+    const target = manualMovements[index];
+    if (!target) return;
     setManualMovements((prev) => prev.filter((_, i) => i !== index));
+    setAllMovements((prev) => prev.filter((m) => m.id !== target.id));
   }
 
   function addManualMovementFromValues(personelRaw: string, tarih: string, saat: string, durum: "G" | "C"): boolean {
@@ -479,7 +503,15 @@ export default function PdksPage() {
       return false;
     }
     setError("");
-    setManualMovements((prev) => [...prev, { personel, datetime: dt, durum }]);
+    const movement: MovementRow = {
+      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      source: "manual",
+      personel,
+      datetime: dt,
+      durum,
+    };
+    setManualMovements((prev) => [...prev, movement]);
+    setAllMovements((prev) => [...prev, movement]);
     return true;
   }
 
@@ -509,8 +541,27 @@ export default function PdksPage() {
     setNotice("Duzelt + Ekle tamamlandi. Hesapla ile sonuca dahil edilir.");
   }
 
+  function removeMovementFromDayList(row: MovementRow) {
+    if (row.source === "manual") {
+      setManualMovements((prev) => prev.filter((m) => m.id !== row.id));
+    } else {
+      setDeletedMovementIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+    }
+    setAllMovements((prev) => prev.filter((m) => m.id !== row.id));
+    setNotice("Hareket listeden silindi. Hesaplama sonucuna yansitmak icin Hesapla'ya basin.");
+    setError("");
+  }
+
   const selectedDaily = useMemo(() => dailyRows.filter((r) => r.personel === selectedPerson), [dailyRows, selectedPerson]);
   const selectedWeekly = useMemo(() => weeklyRows.filter((r) => r.personel === selectedPerson), [weeklyRows, selectedPerson]);
+  const selectedFormDayMovements = useMemo(() => {
+    const personel = manualForm.personel.trim();
+    const tarih = manualForm.tarih;
+    if (!personel || !tarih) return [];
+    return allMovements
+      .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
+      .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
+  }, [allMovements, manualForm.personel, manualForm.tarih]);
   const selectedMonthly = useMemo(() => {
     const map = new Map<string, { net: number; expected: number }>();
     selectedDaily.forEach((r) => {
@@ -539,7 +590,11 @@ export default function PdksPage() {
           <div className="mt-4 grid gap-4 md:grid-cols-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ham PDKS Dosyasi</p>
-              <input className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" type="file" accept=".csv,.xls,.xlsx" onChange={(e) => setPdksFile(e.target.files?.[0] ?? null)} />
+              <input className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" type="file" accept=".csv,.xls,.xlsx" onChange={(e) => {
+                setPdksFile(e.target.files?.[0] ?? null);
+                setDeletedMovementIds([]);
+                setAllMovements([]);
+              }} />
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Eslesen Cift</p>
@@ -591,6 +646,52 @@ export default function PdksPage() {
               Hareket Ekle
             </button>
           </div>
+          <div className="mt-3 rounded-xl border border-slate-200">
+            <div className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+              Secilen Personel + Gun Hareketleri
+            </div>
+            {!manualForm.personel.trim() || !manualForm.tarih ? (
+              <div className="p-3 text-xs text-slate-500">
+                Listelenmesi icin Personel ve Tarih secin.
+              </div>
+            ) : null}
+            <div className="max-h-48 overflow-auto">
+              <table className="w-full border-collapse text-xs">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr>
+                    <th className="border-b p-2 text-left">Personel</th>
+                    <th className="border-b p-2 text-left">Tarih Saat</th>
+                    <th className="border-b p-2 text-left">Durum</th>
+                    <th className="border-b p-2 text-right">Islem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {manualForm.personel.trim() && manualForm.tarih && selectedFormDayMovements.length === 0 ? (
+                    <tr>
+                      <td className="p-2 text-slate-500" colSpan={4}>Bu kisi ve gun icin hareket bulunamadi.</td>
+                    </tr>
+                  ) : (
+                    selectedFormDayMovements.map((m, idx) => (
+                      <tr key={`${m.id}-${idx}`}>
+                        <td className="border-b p-2">{m.personel}</td>
+                        <td className="border-b p-2">{fmtISODateTime(m.datetime)}</td>
+                        <td className="border-b p-2">{m.durum}</td>
+                        <td className="border-b p-2 text-right">
+                          <button
+                            className="rounded-md border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50"
+                            onClick={() => removeMovementFromDayList(m)}
+                          >
+                            Sil
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="mt-3 max-h-48 overflow-auto rounded-xl border border-slate-200">
             <table className="w-full border-collapse text-xs">
               <thead className="sticky top-0 bg-slate-50">
@@ -604,7 +705,7 @@ export default function PdksPage() {
               <tbody>
                 {manualMovements.length === 0 ? (
                   <tr>
-                    <td className="p-2 text-slate-500" colSpan={4}>Manuel hareket yok.</td>
+                    <td className="p-2 text-slate-500" colSpan={4}>Eklenen manuel hareket yok.</td>
                   </tr>
                 ) : (
                   manualMovements.map((m, idx) => (
