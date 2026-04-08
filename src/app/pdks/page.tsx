@@ -242,6 +242,10 @@ export default function PdksPage() {
     saat: "",
     durum: "G" as "G" | "C",
   });
+  const [sorguForm, setSorguForm] = useState({
+    personel: "",
+    tarih: "",
+  });
   const [takvimAy, setTakvimAy] = useState("");
 
   async function processAll() {
@@ -744,6 +748,14 @@ export default function PdksPage() {
       .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
       .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
   }, [allMovements, manualForm.personel, manualForm.tarih]);
+  const sorguGunHareketleri = useMemo(() => {
+    const personel = sorguForm.personel.trim();
+    const tarih = sorguForm.tarih;
+    if (!personel || !tarih) return [];
+    return allMovements
+      .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
+      .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
+  }, [allMovements, sorguForm.personel, sorguForm.tarih]);
   const monthOptions = useMemo(() => {
     const set = new Set<string>();
     dailyRows.forEach((r) => set.add(r.tarih.slice(0, 7)));
@@ -785,23 +797,15 @@ export default function PdksPage() {
     dailyRows.forEach((r) => map.set(`${normalizeText(r.personel)}__${r.tarih}`, r));
     return map;
   }, [dailyRows]);
-  const aylikBakiyeListesi = useMemo(() => {
-    if (!takvimAy) return [] as Array<{ personel: string; toplam: number }>;
+  const aylikToplamByPersonel = useMemo(() => {
     const map = new Map<string, number>();
     takvimPersoneller.forEach((p) => map.set(p, 0));
     dailyRows.forEach((r) => {
-      if (!r.tarih.startsWith(takvimAy)) return;
+      if (!takvimAy || !r.tarih.startsWith(takvimAy)) return;
       map.set(r.personel, (map.get(r.personel) ?? 0) + hhmmToMinutes(r.bakiye));
     });
-    return [...map.entries()]
-      .map(([personel, toplam]) => ({ personel, toplam }))
-      .sort((a, b) => a.personel.localeCompare(b.personel, "tr"));
-  }, [dailyRows, takvimAy, takvimPersoneller]);
-  const aylikToplamByPersonel = useMemo(() => {
-    const map = new Map<string, number>();
-    aylikBakiyeListesi.forEach((r) => map.set(r.personel, r.toplam));
     return map;
-  }, [aylikBakiyeListesi]);
+  }, [dailyRows, takvimAy, takvimPersoneller]);
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
       <div className="mx-auto max-w-[1300px] space-y-5">
@@ -875,6 +879,55 @@ export default function PdksPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold tracking-tight">Ek Hareket Tanimla</h2>
           <p className="mt-1 text-sm text-slate-500">Eksik/yanlis PDKS satirlarini manuel ekleyip hesaplamaya katabilirsiniz.</p>
+          <div className="mt-3 rounded-xl border border-slate-200 p-3">
+            <div className="mb-2 text-sm font-semibold text-slate-700">Hareket Sorgula (Normalize Sonrasi)</div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <input
+                className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
+                placeholder="Personel"
+                value={sorguForm.personel}
+                onChange={(e) => setSorguForm((prev) => ({ ...prev, personel: e.target.value }))}
+              />
+              <input
+                className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
+                type="date"
+                value={sorguForm.tarih}
+                onChange={(e) => setSorguForm((prev) => ({ ...prev, tarih: e.target.value }))}
+              />
+              <button
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50"
+                onClick={() => setManualForm((prev) => ({ ...prev, personel: sorguForm.personel, tarih: sorguForm.tarih }))}
+              >
+                Duzenleme Alanina Aktar
+              </button>
+            </div>
+            <div className="mt-3 overflow-visible">
+              <table className="w-full border-collapse text-xs">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr>
+                    <th className="border-b p-2 text-left">Personel</th>
+                    <th className="border-b p-2 text-left">Tarih Saat</th>
+                    <th className="border-b p-2 text-left">Durum</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sorguForm.personel.trim() && sorguForm.tarih && sorguGunHareketleri.length === 0 ? (
+                    <tr>
+                      <td className="p-2 text-slate-500" colSpan={3}>Bu kisi ve gun icin hareket yok.</td>
+                    </tr>
+                  ) : (
+                    sorguGunHareketleri.map((m, idx) => (
+                      <tr key={`${m.id}-${idx}-sorgu`}>
+                        <td className="border-b p-2">{m.personel}</td>
+                        <td className="border-b p-2">{fmtISODateTime(m.datetime)}</td>
+                        <td className="border-b p-2">{m.durum}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
           <div className="mt-3 grid gap-3 md:grid-cols-5">
             <input
               className="rounded-xl border border-slate-300 bg-white p-2.5 text-sm"
@@ -1059,36 +1112,6 @@ export default function PdksPage() {
               </tbody>
             </table>
             </div>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight">Aylik Bakiye Listesi</h2>
-          <div className="mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200">
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-slate-50">
-                <tr>
-                  <th className="border-b p-2 text-left">Calisan</th>
-                  <th className="border-b p-2 text-right">Aylik Bakiye (+/-)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {aylikBakiyeListesi.length === 0 ? (
-                  <tr>
-                    <td className="p-2 text-slate-500" colSpan={2}>Liste yok.</td>
-                  </tr>
-                ) : (
-                  aylikBakiyeListesi.map((r) => (
-                    <tr key={`${takvimAy}-${r.personel}`}>
-                      <td className="border-b p-2">{r.personel}</td>
-                      <td className={`border-b p-2 text-right font-semibold ${r.toplam < 0 ? "text-rose-700" : "text-emerald-700"}`}>
-                        {minutesToSignedHHMM(r.toplam)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
           </div>
         </section>
 
