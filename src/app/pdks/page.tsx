@@ -36,6 +36,7 @@ type MovementRow = {
   datetime: Date;
   durum: "G" | "C";
 };
+type EmploymentRange = { ise: string | null; ayrilis: string | null };
 
 const DAILY_TARGET_MIN = 8 * 60 + 30;
 const HALF_DAY_TARGET_MIN = DAILY_TARGET_MIN / 2;
@@ -131,6 +132,17 @@ function holidayDateFromRow(row: Record<string, unknown>): string | null {
   if (!m) return null;
   return `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
 }
+function getTakvimGunGolgeClass(durumRaw: string): string {
+  const durum = normalizeText(durumRaw);
+  if (!durum) return "";
+  // Ana personel izin takvimindeki renk paletiyle eslesik.
+  if (durum.includes("arefe")) return "bg-amber-50 text-slate-800";
+  if (durum.includes("resmi") || durum.includes("tatil")) return "bg-slate-200 text-slate-800";
+  if (durum.includes("rapor")) return "bg-pink-500 text-white";
+  if (durum.includes("dis")) return "bg-amber-500 text-white";
+  if (durum.includes("yillik") || durum.includes("izin")) return "bg-sky-500 text-white";
+  return "";
+}
 
 function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: true; h: number; m: number; s: number } {
   if (value instanceof Date) return value;
@@ -206,6 +218,7 @@ export default function PdksPage() {
   const [unmatchedRows, setUnmatchedRows] = useState<UnmatchedRow[]>([]);
   const [allMovements, setAllMovements] = useState<MovementRow[]>([]);
   const [importedRawMovements, setImportedRawMovements] = useState<MovementRow[]>([]);
+  const [employmentRanges, setEmploymentRanges] = useState<Record<string, EmploymentRange>>({});
   const [recalcVersion, setRecalcVersion] = useState(0);
   const calcRunRef = useRef(0);
 
@@ -216,7 +229,6 @@ export default function PdksPage() {
     saat: "",
     durum: "G" as "G" | "C",
   });
-  const [selectedMonth, setSelectedMonth] = useState("");
   const [takvimPersonel, setTakvimPersonel] = useState("");
   const [takvimAy, setTakvimAy] = useState("");
 
@@ -311,6 +323,7 @@ export default function PdksPage() {
         if (a.personel !== b.personel) return a.personel.localeCompare(b.personel, "tr");
         return a.datetime.getTime() - b.datetime.getTime();
       });
+      const employmentRangeMap = new Map<string, EmploymentRange>();
       // Ise giris/ayrilis disi hareketleri, eslestirme ve tum hesaplardan once ele.
       if (hasSupabaseEnv) {
         try {
@@ -319,6 +332,14 @@ export default function PdksPage() {
           const personelCalismaAraligi = new Map(
             (personeller ?? []).map((p) => [normalizeText(p.ad), { ise: p.ise_giris, ayrilis: p.ayrilis_tarihi ?? null }]),
           );
+          const rangesObj: Record<string, EmploymentRange> = {};
+          (personeller ?? []).forEach((p) => {
+            const key = normalizeText(p.ad);
+            const val = { ise: p.ise_giris ?? null, ayrilis: p.ayrilis_tarihi ?? null };
+            employmentRangeMap.set(key, val);
+            rangesObj[key] = val;
+          });
+          setEmploymentRanges(rangesObj);
           const withinEmployment = (personelAd: string, dayIso: string) => {
             const r = personelCalismaAraligi.get(normalizeText(personelAd));
             if (!r) return true;
@@ -475,6 +496,11 @@ export default function PdksPage() {
           }
         }
         iterateDays.forEach((dayKey) => {
+          const er = employmentRangeMap.get(normalizeText(personel));
+          if (er) {
+            if (er.ise && dayKey < er.ise) return;
+            if (er.ayrilis && dayKey > er.ayrilis) return;
+          }
           const date = new Date(dayKey + "T00:00:00");
           const intervals = byDay.get(dayKey) ?? [];
           const sorted = intervals.slice().sort((a, b) => a.giris.getTime() - b.giris.getTime());
@@ -499,13 +525,24 @@ export default function PdksPage() {
           const net = Math.max(0, gross - lunch);
 
           let expected = 0;
+          let gunDurumu = "";
           if (!isSunday(date) && !isSaturday(date)) {
             const holiday = holidayMap.get(dayKey);
-            if (holiday === "full") expected = 0;
-            else expected = holiday === "half" ? HALF_DAY_TARGET_MIN : DAILY_TARGET_MIN;
+            if (holiday === "full") {
+              expected = 0;
+              gunDurumu = "resmi tatil";
+            } else if (holiday === "half") {
+              expected = HALF_DAY_TARGET_MIN;
+              gunDurumu = "arefe";
+            } else {
+              expected = DAILY_TARGET_MIN;
+            }
             const mazeret = normalizeText(mazeretMap.get(`${normalizeText(personel)}__${dayKey}`) || "");
             // Izinler tablosunda kaydi olan tum mazeret/izin gunlerinde beklenen calisma sifirlanir.
-            if (mazeret) expected = 0;
+            if (mazeret) {
+              expected = 0;
+              gunDurumu = mazeretMap.get(`${normalizeText(personel)}__${dayKey}`) || gunDurumu;
+            }
           }
 
           const ws = new Date(date);
@@ -528,7 +565,7 @@ export default function PdksPage() {
             net: minutesToHHMM(net),
             beklenen: minutesToHHMM(expected),
             bakiye: minutesToHHMM(net - expected),
-            durum: mazeretMap.get(`${normalizeText(personel)}__${dayKey}`) || "",
+            durum: gunDurumu,
           });
         });
 
@@ -696,35 +733,6 @@ export default function PdksPage() {
     return [...set].sort((a, b) => a.localeCompare(b, "tr"));
   }, [dailyRows]);
   useEffect(() => {
-    if (monthOptions.length === 0) {
-      if (selectedMonth) setSelectedMonth("");
-      return;
-    }
-    if (selectedMonth && monthOptions.includes(selectedMonth)) return;
-    const fromForm = manualForm.tarih ? manualForm.tarih.slice(0, 7) : "";
-    if (fromForm && monthOptions.includes(fromForm)) {
-      setSelectedMonth(fromForm);
-      return;
-    }
-    setSelectedMonth(monthOptions[monthOptions.length - 1]);
-  }, [monthOptions, selectedMonth, manualForm.tarih]);
-  const monthlyBalanceRows = useMemo(() => {
-    if (!selectedMonth) return [];
-    const map = new Map<string, number>();
-    dailyRows.forEach((r) => {
-      if (!r.tarih.startsWith(selectedMonth)) return;
-      const diff = hhmmToMinutes(r.net) - hhmmToMinutes(r.beklenen);
-      map.set(r.personel, (map.get(r.personel) ?? 0) + diff);
-    });
-    return [...map.entries()]
-      .map(([personel, bakiyeMin]) => ({ personel, bakiyeMin }))
-      .sort((a, b) => a.personel.localeCompare(b.personel, "tr"));
-  }, [dailyRows, selectedMonth]);
-  const weeklyRowsForMonth = useMemo(() => {
-    if (!selectedMonth) return weeklyRows;
-    return weeklyRows.filter((r) => r.hafta_etiket.includes(selectedMonth));
-  }, [weeklyRows, selectedMonth]);
-  useEffect(() => {
     if (personOptions.length === 0) {
       if (takvimPersonel) setTakvimPersonel("");
       return;
@@ -891,7 +899,7 @@ export default function PdksPage() {
                 Listelenmesi icin Personel ve Tarih secin.
               </div>
             ) : null}
-            <div className="max-h-[70vh] overflow-auto">
+            <div className="overflow-visible">
               <table className="w-full border-collapse text-xs">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
@@ -928,79 +936,6 @@ export default function PdksPage() {
             </div>
           </div>
 
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight">Haftalik Calisma ve Fazla Mesai</h2>
-          <p className="mt-1 text-sm text-slate-500">Pazartesi baslangicli hafta toplamlari ve secili ay icin personel bazli +/- bakiye.</p>
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-xs text-slate-500">Ay:</span>
-            <select
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-            >
-              {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          </div>
-          <div className="mt-3 max-h-52 overflow-auto rounded-xl border border-slate-200">
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-slate-50">
-                <tr>
-                  <th className="border-b p-2 text-left">Personel</th>
-                  <th className="border-b p-2 text-right">Aylik Bakiye (+/-)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {monthlyBalanceRows.length === 0 ? (
-                  <tr>
-                    <td className="p-2 text-slate-500" colSpan={2}>Secili ay icin bakiye yok.</td>
-                  </tr>
-                ) : (
-                  monthlyBalanceRows.map((r) => (
-                    <tr key={`${r.personel}-${selectedMonth}`}>
-                      <td className="border-b p-2">{r.personel}</td>
-                      <td className={`border-b p-2 text-right font-semibold ${r.bakiyeMin >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                        {minutesToHHMM(r.bakiyeMin)}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-3 max-h-80 overflow-auto rounded-xl border border-slate-200">
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-slate-50">
-                <tr>
-                  <th className="border-b p-2 text-left">Personel</th>
-                  <th className="border-b p-2 text-left">Hafta</th>
-                  <th className="border-b p-2 text-right">Net Calisma</th>
-                  <th className="border-b p-2 text-right">Beklenen</th>
-                  <th className="border-b p-2 text-right">Bakiye (+/-)</th>
-                  <th className="border-b p-2 text-right">Fazla Mesai (+)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {weeklyRowsForMonth.length === 0 ? (
-                  <tr>
-                    <td className="p-2 text-slate-500" colSpan={6}>Haftalik sonuc yok.</td>
-                  </tr>
-                ) : (
-                  weeklyRowsForMonth.map((r) => (
-                    <tr key={`${r.personel}-${r.hafta}`}>
-                      <td className="border-b p-2">{r.personel}</td>
-                      <td className="border-b p-2">{r.hafta_etiket}</td>
-                      <td className="border-b p-2 text-right">{r.haftalik_net}</td>
-                      <td className="border-b p-2 text-right">{r.haftalik_beklenen}</td>
-                      <td className={`border-b p-2 text-right font-semibold ${r.haftalik_bakiye.startsWith("-") ? "text-rose-700" : "text-emerald-700"}`}>{r.haftalik_bakiye}</td>
-                      <td className="border-b p-2 text-right font-semibold text-emerald-700">{r.haftalik_fazla_mesai}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -1056,29 +991,34 @@ export default function PdksPage() {
                       </td>
                       {h.gunler.map((iso, dayIdx) => {
                         const ayDisi = !iso.startsWith(takvimAy);
+                        const er = employmentRanges[normalizeText(takvimPersonel)];
+                        const calismaDisi = !!er && ((er.ise ? iso < er.ise : false) || (er.ayrilis ? iso > er.ayrilis : false));
                         const row = dailyRows.find((r) => r.personel === takvimPersonel && r.tarih === iso);
                         const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
                         const weekend = dayIdx >= 5;
+                        const durumGolge = row ? getTakvimGunGolgeClass(row.durum) : "";
                         return (
                           <td
                             key={iso}
                             className={`min-w-[108px] rounded-lg border p-2 align-top ${
                               ayDisi
                                 ? "border-slate-200 bg-slate-100 text-slate-400"
+                                : calismaDisi
+                                  ? "border-slate-200 bg-slate-100 text-slate-300"
                                 : weekend
                                   ? "border-slate-200 bg-slate-50"
                                   : "border-slate-200 bg-white"
-                            }`}
+                            } ${!ayDisi ? durumGolge : ""}`}
                           >
                             <div className="text-[10px] font-semibold">{iso.slice(8, 10)}</div>
                             <div className={`mt-1 inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${
-                              !row
+                              !row || calismaDisi
                                 ? "bg-slate-100 text-slate-500"
                                 : bakiyeMin < 0
                                   ? "bg-rose-100 text-rose-700"
                                   : "bg-emerald-100 text-emerald-700"
                             }`}>
-                              {row ? row.bakiye : "--:--"}
+                              {row && !calismaDisi ? row.bakiye : ""}
                             </div>
                           </td>
                         );
