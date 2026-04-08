@@ -97,6 +97,17 @@ function mdKey(d: Date): string {
 function minutesOfDay(d: Date): number {
   return d.getHours() * 60 + d.getMinutes();
 }
+function dedupeExactSameDirectionMovements(list: MovementRow[]): MovementRow[] {
+  const seen = new Set<string>();
+  const out: MovementRow[] = [];
+  list.forEach((m) => {
+    const key = `${normalizeText(m.personel)}__${fmtISODateTime(m.datetime)}__${m.durum}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(m);
+  });
+  return out;
+}
 
 function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: true; h: number; m: number; s: number } {
   if (value instanceof Date) return value;
@@ -271,14 +282,15 @@ export default function PdksPage() {
       // Manuel eklenen hareketleri de ham akisa dahil et.
       const movements = [...rawMovements, ...manualMovements];
       const activeMovements = movements.filter((m) => !deletedMovementIds.includes(m.id));
-      const nextAllMovements = activeMovements.slice().sort((a, b) => {
+      const dedupedMovements = dedupeExactSameDirectionMovements(activeMovements);
+      const nextAllMovements = dedupedMovements.slice().sort((a, b) => {
         if (a.personel !== b.personel) return a.personel.localeCompare(b.personel, "tr");
         return a.datetime.getTime() - b.datetime.getTime();
       });
 
       // Pair G-C
       const byPerson = new Map<string, Array<{ datetime: Date; durum: "G" | "C" }>>();
-      activeMovements.forEach((m) => {
+      dedupedMovements.forEach((m) => {
         if (!byPerson.has(m.personel)) byPerson.set(m.personel, []);
         byPerson.get(m.personel)!.push({ datetime: m.datetime, durum: m.durum });
       });
