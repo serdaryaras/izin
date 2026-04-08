@@ -365,18 +365,29 @@ export default function PdksPage() {
           nextAllMovements.splice(0, nextAllMovements.length, ...filtered);
         } catch {
           // Personel tarihi okunamazsa mevcut akisla devam.
+          setEmploymentRanges({});
         }
+      } else {
+        setEmploymentRanges({});
       }
 
       // Pair G-C
-      const byPerson = new Map<string, Array<{ datetime: Date; durum: "G" | "C" }>>();
+      const byPerson = new Map<string, { display: string; list: Array<{ datetime: Date; durum: "G" | "C" }> }>();
       nextAllMovements.forEach((m) => {
-        if (!byPerson.has(m.personel)) byPerson.set(m.personel, []);
-        byPerson.get(m.personel)!.push({ datetime: m.datetime, durum: m.durum });
+        const key = normalizeText(m.personel);
+        if (!byPerson.has(key)) {
+          byPerson.set(key, {
+            display: m.personel.trim().replace(/\s+/g, " "),
+            list: [],
+          });
+        }
+        byPerson.get(key)!.list.push({ datetime: m.datetime, durum: m.durum });
       });
       const pairs: PairRecord[] = [];
       const unmatched: UnmatchedRow[] = [];
-      [...byPerson.entries()].forEach(([personel, list]) => {
+      [...byPerson.entries()].forEach(([, personRec]) => {
+        const personel = personRec.display;
+        const list = personRec.list;
         list.sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
         let open: Date | null = null;
         list.forEach((x) => {
@@ -1069,6 +1080,7 @@ export default function PdksPage() {
                         const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
                         const bakiyeText = row ? row.bakiye : "";
                         const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
+                        const calismaDisiVeKayitYok = calismaDisi && !row;
                         const d = new Date(`${iso}T00:00:00`);
                         const isPazar = d.getDay() === 0;
                         const holiday = holidayDayTypeMap[iso];
@@ -1083,16 +1095,16 @@ export default function PdksPage() {
                         return (
                           <td
                             key={`${p}-${iso}`}
-                            className={`h-7 min-w-0 border border-slate-400 p-0 align-middle ${calismaDisi ? "bg-slate-100 text-slate-300" : cellBg}`}
+                            className={`h-7 min-w-0 border border-slate-400 p-0 align-middle ${calismaDisiVeKayitYok ? "bg-slate-100 text-slate-300" : cellBg}`}
                             title={cellDurum || ""}
                           >
-                            {!calismaDisi && leaveCode ? (
+                            {leaveCode ? (
                               <span className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm text-[10px] font-bold leading-none tracking-tight ${getTakvimGunGolgeClass(cellDurum)}`}>
                                 {leaveCode}
                               </span>
                             ) : (
                               <span className={`inline-block w-full text-center text-[10px] font-semibold ${bakiyeMin < 0 ? "text-rose-700" : "text-emerald-700"}`}>
-                                {!calismaDisi ? bakiyeText : ""}
+                                {calismaDisiVeKayitYok ? "" : bakiyeText}
                               </span>
                             )}
                           </td>
