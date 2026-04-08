@@ -966,7 +966,8 @@ export default function PdksPage() {
               {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
-          <div className="mt-3 overflow-auto rounded-xl border border-slate-400">
+          <div className="mt-3 overflow-hidden rounded-xl">
+            <div className="overflow-auto">
             <table className="w-full table-fixed border-collapse text-xs">
               <colgroup>
                 <col style={{ width: "10rem" }} />
@@ -1057,6 +1058,7 @@ export default function PdksPage() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </section>
 
