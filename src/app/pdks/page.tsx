@@ -212,6 +212,8 @@ export default function PdksPage() {
     durum: "G" as "G" | "C",
   });
   const [selectedMonth, setSelectedMonth] = useState("");
+  const [takvimPersonel, setTakvimPersonel] = useState("");
+  const [takvimAy, setTakvimAy] = useState("");
 
   async function processAll() {
     const runId = ++calcRunRef.current;
@@ -304,6 +306,27 @@ export default function PdksPage() {
         if (a.personel !== b.personel) return a.personel.localeCompare(b.personel, "tr");
         return a.datetime.getTime() - b.datetime.getTime();
       });
+      // Ise giris/ayrilis disi hareketleri, eslestirme ve tum hesaplardan once ele.
+      if (hasSupabaseEnv) {
+        try {
+          const sb = getSupabaseClient();
+          const { data: personeller } = await sb.from("personel").select("ad,ise_giris,ayrilis_tarihi");
+          const personelCalismaAraligi = new Map(
+            (personeller ?? []).map((p) => [normalizeText(p.ad), { ise: p.ise_giris, ayrilis: p.ayrilis_tarihi ?? null }]),
+          );
+          const withinEmployment = (personelAd: string, dayIso: string) => {
+            const r = personelCalismaAraligi.get(normalizeText(personelAd));
+            if (!r) return true;
+            if (r.ise && dayIso < r.ise) return false;
+            if (r.ayrilis && dayIso > r.ayrilis) return false;
+            return true;
+          };
+          const filtered = nextAllMovements.filter((m) => withinEmployment(m.personel, fmtDateKey(m.datetime)));
+          nextAllMovements.splice(0, nextAllMovements.length, ...filtered);
+        } catch {
+          // Personel tarihi okunamazsa mevcut akisla devam.
+        }
+      }
 
       // Pair G-C
       const byPerson = new Map<string, Array<{ datetime: Date; durum: "G" | "C" }>>();
@@ -382,9 +405,6 @@ export default function PdksPage() {
             sb.from("resmi_tatil_gunleri").select("*"),
           ]);
           const personelAdById = new Map((personeller ?? []).map((p) => [p.id, p.ad]));
-          const personelCalismaAraligi = new Map(
-            (personeller ?? []).map((p) => [normalizeText(p.ad), { ise: p.ise_giris, ayrilis: p.ayrilis_tarihi ?? null }]),
-          );
           (izinler ?? []).forEach((i) => {
             const ad = personelAdById.get(i.personel_id);
             if (!ad) return;
@@ -418,15 +438,6 @@ export default function PdksPage() {
             const prev = addDays(iso, -1);
             if (holidayMap.get(prev) !== "full") holidayMap.set(prev, "half");
           });
-          const withinEmployment = (personelAd: string, dayIso: string) => {
-            const r = personelCalismaAraligi.get(normalizeText(personelAd));
-            if (!r) return true;
-            if (r.ise && dayIso < r.ise) return false;
-            if (r.ayrilis && dayIso > r.ayrilis) return false;
-            return true;
-          };
-          const filtered = nextAllMovements.filter((m) => withinEmployment(m.personel, fmtDateKey(m.datetime)));
-          nextAllMovements.splice(0, nextAllMovements.length, ...filtered);
         } catch {
           // Mazeret okunamasa da duzeltme ekraninin hesaplari devam etsin.
         }
@@ -674,6 +685,11 @@ export default function PdksPage() {
     dailyRows.forEach((r) => set.add(r.tarih.slice(0, 7)));
     return [...set].sort();
   }, [dailyRows]);
+  const personOptions = useMemo(() => {
+    const set = new Set<string>();
+    dailyRows.forEach((r) => set.add(r.personel));
+    return [...set].sort((a, b) => a.localeCompare(b, "tr"));
+  }, [dailyRows]);
   useEffect(() => {
     if (monthOptions.length === 0) {
       if (selectedMonth) setSelectedMonth("");
@@ -703,6 +719,54 @@ export default function PdksPage() {
     if (!selectedMonth) return weeklyRows;
     return weeklyRows.filter((r) => r.hafta_etiket.includes(selectedMonth));
   }, [weeklyRows, selectedMonth]);
+  useEffect(() => {
+    if (personOptions.length === 0) {
+      if (takvimPersonel) setTakvimPersonel("");
+      return;
+    }
+    if (takvimPersonel && personOptions.includes(takvimPersonel)) return;
+    setTakvimPersonel(personOptions[0]);
+  }, [personOptions, takvimPersonel]);
+  useEffect(() => {
+    if (monthOptions.length === 0) {
+      if (takvimAy) setTakvimAy("");
+      return;
+    }
+    if (takvimAy && monthOptions.includes(takvimAy)) return;
+    setTakvimAy(monthOptions[monthOptions.length - 1]);
+  }, [monthOptions, takvimAy]);
+  const takvimHaftalar = useMemo(() => {
+    if (!takvimPersonel || !takvimAy) return [] as Array<{ gunler: string[]; haftaToplam: number }>;
+    const personDaily = new Map(
+      dailyRows
+        .filter((r) => r.personel === takvimPersonel && r.tarih.startsWith(takvimAy))
+        .map((r) => [r.tarih, hhmmToMinutes(r.bakiye)]),
+    );
+    const [y, m] = takvimAy.split("-").map(Number);
+    if (!y || !m) return [];
+    const first = new Date(y, m - 1, 1);
+    const last = new Date(y, m, 0);
+    const firstWeekStart = new Date(first);
+    const firstDay = firstWeekStart.getDay();
+    firstWeekStart.setDate(firstWeekStart.getDate() + (firstDay === 0 ? -6 : 1 - firstDay));
+    const lastWeekEnd = new Date(last);
+    const lastDay = lastWeekEnd.getDay();
+    lastWeekEnd.setDate(lastWeekEnd.getDate() + (lastDay === 0 ? 0 : 7 - lastDay));
+    const rows: Array<{ gunler: string[]; haftaToplam: number }> = [];
+    for (let ws = new Date(firstWeekStart); ws <= lastWeekEnd; ws.setDate(ws.getDate() + 7)) {
+      const gunler: string[] = [];
+      let toplam = 0;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(ws);
+        d.setDate(d.getDate() + i);
+        const iso = fmtDateKey(d);
+        gunler.push(iso);
+        toplam += personDaily.get(iso) ?? 0;
+      }
+      rows.push({ gunler, haftaToplam: toplam });
+    }
+    return rows;
+  }, [dailyRows, takvimPersonel, takvimAy]);
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
       <div className="mx-auto max-w-[1300px] space-y-5">
@@ -920,6 +984,70 @@ export default function PdksPage() {
                       <td className="border-b p-2 text-right">{r.haftalik_beklenen}</td>
                       <td className={`border-b p-2 text-right font-semibold ${r.haftalik_bakiye.startsWith("-") ? "text-rose-700" : "text-emerald-700"}`}>{r.haftalik_bakiye}</td>
                       <td className="border-b p-2 text-right font-semibold text-emerald-700">{r.haftalik_fazla_mesai}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold tracking-tight">Kisi Bazli Aylik Bakiye Takvimi</h2>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <select
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+              value={takvimPersonel}
+              onChange={(e) => setTakvimPersonel(e.target.value)}
+            >
+              {personOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <select
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+              value={takvimAy}
+              onChange={(e) => setTakvimAy(e.target.value)}
+            >
+              {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div className="mt-3 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="border-b p-2 text-left">Pzt</th>
+                  <th className="border-b p-2 text-left">Sal</th>
+                  <th className="border-b p-2 text-left">Car</th>
+                  <th className="border-b p-2 text-left">Per</th>
+                  <th className="border-b p-2 text-left">Cum</th>
+                  <th className="border-b p-2 text-left">Cmt</th>
+                  <th className="border-b p-2 text-left">Paz</th>
+                  <th className="border-b p-2 text-right">Hafta Toplami</th>
+                </tr>
+              </thead>
+              <tbody>
+                {takvimHaftalar.length === 0 ? (
+                  <tr>
+                    <td className="p-2 text-slate-500" colSpan={8}>Takvim verisi yok.</td>
+                  </tr>
+                ) : (
+                  takvimHaftalar.map((h, idx) => (
+                    <tr key={`${takvimPersonel}-${takvimAy}-${idx}`}>
+                      {h.gunler.map((iso) => {
+                        const ayDisi = !iso.startsWith(takvimAy);
+                        const row = dailyRows.find((r) => r.personel === takvimPersonel && r.tarih === iso);
+                        const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
+                        return (
+                          <td key={iso} className={`border-b p-2 align-top ${ayDisi ? "bg-slate-50 text-slate-400" : ""}`}>
+                            <div className="text-[10px]">{iso.slice(8, 10)}</div>
+                            <div className={`font-semibold ${bakiyeMin < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                              {row ? row.bakiye : "--:--"}
+                            </div>
+                          </td>
+                        );
+                      })}
+                      <td className={`border-b p-2 text-right font-semibold ${h.haftaToplam < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                        {minutesToHHMM(h.haftaToplam)}
+                      </td>
                     </tr>
                   ))
                 )}
