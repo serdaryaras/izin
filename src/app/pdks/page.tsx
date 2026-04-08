@@ -219,6 +219,8 @@ export default function PdksPage() {
   const [allMovements, setAllMovements] = useState<MovementRow[]>([]);
   const [importedRawMovements, setImportedRawMovements] = useState<MovementRow[]>([]);
   const [employmentRanges, setEmploymentRanges] = useState<Record<string, EmploymentRange>>({});
+  const [leaveDayStatusMap, setLeaveDayStatusMap] = useState<Record<string, string>>({});
+  const [holidayDayTypeMap, setHolidayDayTypeMap] = useState<Record<string, "full" | "half">>({});
   const [recalcVersion, setRecalcVersion] = useState(0);
   const calcRunRef = useRef(0);
 
@@ -469,6 +471,14 @@ export default function PdksPage() {
         }
       }
       const nextMazeretCount = mazeretMap.size;
+      const leaveMapObj: Record<string, string> = {};
+      mazeretMap.forEach((v, k) => {
+        leaveMapObj[k] = v;
+      });
+      const holidayMapObj: Record<string, "full" | "half"> = {};
+      holidayMap.forEach((v, k) => {
+        holidayMapObj[k] = v;
+      });
 
       // Daily/weekly calculations
       const byP = new Map<string, PairRecord[]>();
@@ -593,6 +603,8 @@ export default function PdksPage() {
       setUnmatchedRows(unmatched);
       setPairCount(pairs.length);
       setMazeretCount(nextMazeretCount);
+      setLeaveDayStatusMap(leaveMapObj);
+      setHolidayDayTypeMap(holidayMapObj);
       setDailyRows(dRows);
       setWeeklyRows(wRows);
       setPersonCount(nextPersonCount);
@@ -994,9 +1006,13 @@ export default function PdksPage() {
                         const er = employmentRanges[normalizeText(takvimPersonel)];
                         const calismaDisi = !!er && ((er.ise ? iso < er.ise : false) || (er.ayrilis ? iso > er.ayrilis : false));
                         const row = dailyRows.find((r) => r.personel === takvimPersonel && r.tarih === iso);
+                        const mapKey = `${normalizeText(takvimPersonel)}__${iso}`;
+                        const leaveDurum = leaveDayStatusMap[mapKey] || "";
+                        const holidayDurum = holidayDayTypeMap[iso] === "full" ? "resmi tatil" : holidayDayTypeMap[iso] === "half" ? "arefe" : "";
+                        const cellDurum = row?.durum || leaveDurum || holidayDurum;
                         const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
                         const weekend = dayIdx >= 5;
-                        const durumGolge = row ? getTakvimGunGolgeClass(row.durum) : "";
+                        const durumGolge = cellDurum ? getTakvimGunGolgeClass(cellDurum) : "";
                         return (
                           <td
                             key={iso}
