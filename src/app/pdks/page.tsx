@@ -143,6 +143,17 @@ function getTakvimGunGolgeClass(durumRaw: string): string {
   if (durum.includes("yillik") || durum.includes("izin")) return "bg-sky-500 text-white";
   return "";
 }
+function izinKodKisaltmaFromDurum(durumRaw: string): string {
+  const d = normalizeText(durumRaw);
+  if (!d) return "";
+  if (d.includes("yillik") || d.includes("izin")) return "Y";
+  if (d.includes("rapor")) return "R";
+  if (d.includes("dis")) return "D";
+  if (d.includes("evlilik")) return "E";
+  if (d.includes("cenaze")) return "C";
+  if (d.includes("dogum")) return "DG";
+  return "";
+}
 
 function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: true; h: number; m: number; s: number } {
   if (value instanceof Date) return value;
@@ -951,11 +962,32 @@ export default function PdksPage() {
             </select>
           </div>
           <div className="mt-3 overflow-auto rounded-xl border border-slate-200">
-            <table className="w-full border-collapse text-xs">
+            <table className="w-full table-fixed border-collapse text-xs">
+              <colgroup>
+                <col style={{ width: "10rem" }} />
+                {takvimGunleri.map((d) => <col key={d} />)}
+              </colgroup>
               <thead className="sticky top-0 bg-slate-50">
                 <tr>
-                  <th className="border-b p-2 text-left">Calisan</th>
-                  {takvimGunleri.map((iso) => <th key={iso} className="border-b p-1 text-center">{Number(iso.slice(8, 10))}</th>)}
+                  <th className="sticky left-0 z-10 border bg-white px-1.5 py-1 text-left text-xs font-semibold shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">Calisan</th>
+                  {takvimGunleri.map((iso) => {
+                    const d = new Date(`${iso}T00:00:00`);
+                    const isPazar = d.getDay() === 0;
+                    const holiday = holidayDayTypeMap[iso];
+                    const bg =
+                      holiday === "full"
+                        ? "bg-slate-200"
+                        : holiday === "half"
+                          ? "bg-amber-100"
+                          : isPazar
+                            ? "bg-rose-100"
+                            : "bg-white";
+                    return (
+                      <th key={iso} className={`border p-0.5 text-center text-[10px] font-medium leading-none ${bg}`}>
+                        {Number(iso.slice(8, 10))}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -966,7 +998,9 @@ export default function PdksPage() {
                 ) : (
                   takvimPersoneller.map((p) => (
                     <tr key={`${takvimAy}-${p}`}>
-                      <td className="border-b p-2 font-medium">{p}</td>
+                      <td className="sticky left-0 z-10 overflow-hidden border bg-white px-1.5 py-0.5 align-middle shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">
+                        <div className="truncate text-xs font-medium leading-tight" title={p}>{p}</div>
+                      </td>
                       {takvimGunleri.map((iso) => {
                         const er = employmentRanges[normalizeText(p)];
                         const calismaDisi = !!er && ((er.ise ? iso < er.ise : false) || (er.ayrilis ? iso > er.ayrilis : false));
@@ -975,15 +1009,34 @@ export default function PdksPage() {
                         const holidayDurum = holidayDayTypeMap[iso] === "full" ? "resmi tatil" : holidayDayTypeMap[iso] === "half" ? "arefe" : "";
                         const cellDurum = row?.durum || leaveDurum || holidayDurum;
                         const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
+                        const bakiyeText = row && bakiyeMin !== 0 ? row.bakiye : "";
+                        const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
+                        const d = new Date(`${iso}T00:00:00`);
+                        const isPazar = d.getDay() === 0;
+                        const holiday = holidayDayTypeMap[iso];
+                        const cellBg =
+                          holiday === "full"
+                            ? "bg-slate-200"
+                            : holiday === "half"
+                              ? "bg-amber-100"
+                              : isPazar
+                                ? "bg-rose-100"
+                                : "bg-white";
                         return (
                           <td
                             key={`${p}-${iso}`}
-                            className={`border-b p-1 text-center ${calismaDisi ? "bg-slate-100 text-slate-300" : getTakvimGunGolgeClass(cellDurum)}`}
+                            className={`h-7 min-w-0 border p-0 align-middle ${calismaDisi ? "bg-slate-100 text-slate-300" : cellBg}`}
                             title={cellDurum || ""}
                           >
-                            {row && !calismaDisi ? (
-                              <span className={bakiyeMin < 0 ? "text-rose-700" : "text-emerald-700"}>{row.bakiye}</span>
-                            ) : ""}
+                            {!calismaDisi && leaveCode ? (
+                              <span className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm text-[10px] font-bold leading-none tracking-tight ${getTakvimGunGolgeClass(cellDurum)}`}>
+                                {leaveCode}
+                              </span>
+                            ) : (
+                              <span className={`inline-block w-full text-center text-[10px] font-semibold ${bakiyeMin < 0 ? "text-rose-700" : "text-emerald-700"}`}>
+                                {!calismaDisi ? bakiyeText : ""}
+                              </span>
+                            )}
                           </td>
                         );
                       })}
