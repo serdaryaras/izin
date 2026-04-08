@@ -701,7 +701,7 @@ export default function PdksPage() {
                     </tr>
                   ) : (
                     selectedFormDayMovements.map((m, idx) => (
-                      <tr key={`${m.id}-${idx}`}>
+                      <tr key={`${m.id}-${idx}`} className={m.durum === "C" ? "bg-rose-50/70" : "bg-white"}>
                         <td className="border-b p-2">{m.personel}</td>
                         <td className="border-b p-2">{fmtISODateTime(m.datetime)}</td>
                         <td className="border-b p-2">{m.durum}</td>
