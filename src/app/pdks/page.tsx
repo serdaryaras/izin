@@ -29,6 +29,7 @@ const LUNCH_START_MIN = 11 * 60 + 30;
 const LUNCH_END_MIN = 14 * 60 + 30;
 const FULL_LUNCH_MIN = 60;
 const WEEKEND_LUNCH_EXEMPT_THRESHOLD_MIN = 4 * 60 + 30;
+const MAX_SHIFT_MIN = 18 * 60;
 const FULL_HOLIDAYS = new Set(["01-01", "04-23", "05-01", "05-19", "07-15", "08-30", "10-29"]);
 const HALF_HOLIDAYS = new Set(["10-28"]);
 
@@ -66,6 +67,10 @@ function hhmmToMinutes(text: string): number {
 }
 function isWeekend(d: Date): boolean {
   return d.getDay() === 0 || d.getDay() === 6;
+}
+function isSundayDateKey(isoDay: string): boolean {
+  const d = new Date(`${isoDay}T00:00:00`);
+  return d.getDay() === 0;
 }
 function mdKey(d: Date): string {
   return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -181,8 +186,13 @@ export default function PdksPage() {
           const p = String(row[personel] ?? "").trim();
           const d = excelDateToJS(XLSX, row[tarih]);
           const t = excelDateToJS(XLSX, row[saat]);
-          const s = normalizeText(row[durum]).toUpperCase();
-          if (!p || !d || !s || (s !== "G" && s !== "C")) continue;
+          const rawDurum = normalizeText(row[durum]);
+          const s: "G" | "C" | "" = rawDurum.startsWith("g")
+            ? "G"
+            : rawDurum.startsWith("c")
+              ? "C"
+              : "";
+          if (!p || !d || !s) continue;
           let dt: Date | null = null;
           if (d instanceof Date && t && typeof t === "object" && "timeOnly" in t) {
             dt = new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.h, t.m, t.s || 0);
@@ -223,11 +233,18 @@ export default function PdksPage() {
         list.sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
         let open: Date | null = null;
         list.forEach((x) => {
-          if (x.durum === "G") open = x.datetime;
-          else if (x.durum === "C" && open && x.datetime.getTime() > open.getTime()) {
-            pairs.push({ personel, giris: open, cikis: x.datetime });
-            open = null;
+          if (x.durum === "G") {
+            // Coklu giris durumunda en guncel girisi baz al.
+            open = x.datetime;
+            return;
           }
+          if (!open) return;
+          const diffMin = Math.round((x.datetime.getTime() - open.getTime()) / 60000);
+          if (diffMin > 0 && diffMin <= MAX_SHIFT_MIN) {
+            // Ayni gun + geceyi asan (24:00 sonrasi) vardiyalar burada eslesir.
+            pairs.push({ personel, giris: open, cikis: x.datetime });
+          }
+          open = null;
         });
       });
       setCleanRecords(pairs);
@@ -404,7 +421,15 @@ export default function PdksPage() {
                 <table className="w-full border-collapse">
                   <thead><tr><th className="border-b p-1 text-left">Tarih</th><th className="border-b p-1 text-right">Net</th><th className="border-b p-1 text-right">Beklenen</th><th className="border-b p-1 text-right">Bakiye</th><th className="border-b p-1 text-left">Durum</th></tr></thead>
                   <tbody>
-                    {selectedDaily.map((r) => <tr key={`${r.personel}-${r.tarih}`}><td className="border-b p-1">{r.tarih}</td><td className="border-b p-1 text-right">{r.net}</td><td className="border-b p-1 text-right">{r.beklenen}</td><td className="border-b p-1 text-right">{r.bakiye}</td><td className="border-b p-1">{r.durum || "-"}</td></tr>)}
+                    {selectedDaily.map((r) => (
+                      <tr key={`${r.personel}-${r.tarih}`} className={isSundayDateKey(r.tarih) ? "bg-red-50" : ""}>
+                        <td className="border-b p-1">{r.tarih}</td>
+                        <td className="border-b p-1 text-right">{r.net}</td>
+                        <td className="border-b p-1 text-right">{r.beklenen}</td>
+                        <td className="border-b p-1 text-right">{r.bakiye}</td>
+                        <td className="border-b p-1">{r.durum || "-"}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
