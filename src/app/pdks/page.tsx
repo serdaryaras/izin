@@ -65,6 +65,9 @@ function fmtDateKey(d: Date): string {
 function fmtISODateTime(d: Date): string {
   return `${fmtDateKey(d)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
+function fmtTimeHHMM(d: Date): string {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 function minutesToHHMM(total: number): string {
   const sign = total < 0 ? "-" : "";
   const abs = Math.abs(Math.round(total));
@@ -717,6 +720,38 @@ export default function PdksPage() {
     setError("");
   }
 
+  async function exportFinalMovementsAsXlsx() {
+    if (allMovements.length === 0) {
+      setError("Disa aktarma icin once veri hesaplanmali.");
+      return;
+    }
+    try {
+      const XLSX = await import("xlsx");
+      const rows = allMovements
+        .slice()
+        .sort((a, b) => {
+          if (a.personel !== b.personel) return a.personel.localeCompare(b.personel, "tr");
+          return a.datetime.getTime() - b.datetime.getTime();
+        })
+        .map((m) => ({
+          "Personel Adi Soyadi": m.personel,
+          Tarih: fmtDateKey(m.datetime),
+          Saat: fmtTimeHHMM(m.datetime),
+          Durum: m.durum,
+        }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "PDKS");
+      const now = new Date();
+      const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+      XLSX.writeFile(wb, `pdks-duzeltilmis-son-hali-${stamp}.xlsx`);
+      setError("");
+      setNotice("Duzeltilmis veri dosyasi .xlsx olarak indirildi.");
+    } catch {
+      setError("XLSX disa aktarma sirasinda hata olustu.");
+    }
+  }
+
   useEffect(() => {
     if (!pdksFile) return;
     void processAll();
@@ -829,6 +864,13 @@ export default function PdksPage() {
           </div>
           <div className="mt-4 flex gap-2">
             <button className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800" onClick={() => void processAll()}>Hesapla</button>
+            <button
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void exportFinalMovementsAsXlsx()}
+              disabled={allMovements.length === 0}
+            >
+              Son Veriyi XLSX Kaydet
+            </button>
           </div>
           {notice ? <div className="mt-3 rounded-lg bg-emerald-50 p-3 text-emerald-700">{notice}</div> : null}
           {error ? <div className="mt-3 rounded-lg bg-rose-50 p-3 text-rose-700">{error}</div> : null}
@@ -915,8 +957,8 @@ export default function PdksPage() {
               Hareket Ekle
             </button>
           </div>
-          <div className="mt-3 rounded-xl border border-slate-200">
-            <div className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+          <div className="mt-3 overflow-hidden rounded-xl border border-slate-400">
+            <div className="border-b border-slate-400 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
               Secilen Personel + Gun Hareketleri
             </div>
             {!manualForm.personel.trim() || !manualForm.tarih ? (
@@ -928,10 +970,10 @@ export default function PdksPage() {
               <table className="w-full border-collapse text-xs">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr>
-                    <th className="border-b p-2 text-left">Personel</th>
-                    <th className="border-b p-2 text-left">Tarih Saat</th>
-                    <th className="border-b p-2 text-left">Durum</th>
-                    <th className="border-b p-2 text-right">Islem</th>
+                    <th className="border-b border-slate-400 p-2 text-left">Personel</th>
+                    <th className="border-b border-slate-400 p-2 text-left">Tarih Saat</th>
+                    <th className="border-b border-slate-400 p-2 text-left">Durum</th>
+                    <th className="border-b border-slate-400 p-2 text-right">Islem</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -942,10 +984,10 @@ export default function PdksPage() {
                   ) : (
                     selectedFormDayMovements.map((m, idx) => (
                       <tr key={`${m.id}-${idx}`} className={m.durum === "C" ? "bg-rose-50/70" : "bg-white"}>
-                        <td className="border-b p-2">{m.personel}</td>
-                        <td className="border-b p-2">{fmtISODateTime(m.datetime)}</td>
-                        <td className="border-b p-2">{m.durum}</td>
-                        <td className="border-b p-2 text-right">
+                        <td className="border-b border-slate-400 p-2">{m.personel}</td>
+                        <td className="border-b border-slate-400 p-2">{fmtISODateTime(m.datetime)}</td>
+                        <td className="border-b border-slate-400 p-2">{m.durum}</td>
+                        <td className="border-b border-slate-400 p-2 text-right">
                           <button
                             className="rounded-md border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50"
                             onClick={() => removeMovementFromDayList(m)}
@@ -975,7 +1017,7 @@ export default function PdksPage() {
               {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
           </div>
-          <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-slate-400">
+          <div className="mt-3 overflow-hidden rounded-xl ring-[0.5px] ring-slate-400">
             <div className="overflow-auto">
             <table className="w-full table-fixed border-collapse text-xs">
               <colgroup>
