@@ -311,7 +311,7 @@ export default function PdksPage() {
             return;
           }
           const diffMin = Math.round((x.datetime.getTime() - open.getTime()) / 60000);
-          if (diffMin > 0 && diffMin <= MAX_SHIFT_MIN) {
+          if (diffMin >= 0 && diffMin <= MAX_SHIFT_MIN) {
             // Ayni gun + geceyi asan (24:00 sonrasi) vardiyalar burada eslesir.
             pairs.push({ personel, giris: open, cikis: x.datetime });
           } else {
