@@ -45,7 +45,6 @@ const LUNCH_END_MIN = 14 * 60 + 30;
 const FULL_LUNCH_MIN = 60;
 const WEEKEND_LUNCH_ZERO_MAX_MIN = 4 * 60 + 15;
 const WEEKEND_LUNCH_HALF_MAX_MIN = 8 * 60;
-const MAX_SHIFT_MIN = 18 * 60;
 
 function normalizeText(value: unknown): string {
   if (value == null) return "";
@@ -404,7 +403,7 @@ export default function PdksPage() {
             return;
           }
           const diffMin = Math.round((x.datetime.getTime() - open.getTime()) / 60000);
-          if (diffMin >= 0 && diffMin <= MAX_SHIFT_MIN) {
+          if (diffMin >= 0) {
             // Ayni gun + geceyi asan (24:00 sonrasi) vardiyalar burada eslesir.
             pairs.push({ personel, giris: open, cikis: x.datetime });
           } else {
@@ -1068,7 +1067,7 @@ export default function PdksPage() {
                         const holidayDurum = holidayDayTypeMap[iso] === "full" ? "resmi tatil" : holidayDayTypeMap[iso] === "half" ? "arefe" : "";
                         const cellDurum = row?.durum || leaveDurum || holidayDurum;
                         const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
-                        const bakiyeText = row && bakiyeMin !== 0 ? row.bakiye : "";
+                        const bakiyeText = row ? row.bakiye : "";
                         const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
                         const d = new Date(`${iso}T00:00:00`);
                         const isPazar = d.getDay() === 0;
