@@ -595,7 +595,8 @@ export default function PdksPage() {
     if (!personel || !tarih) return [];
     return allMovements
       .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
-      .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
+      .sort((a, b) => a.datetime.getTime() - b.datetime.getTime())
+      .slice(0, 30);
   }, [allMovements, manualForm.personel, manualForm.tarih]);
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
