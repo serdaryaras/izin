@@ -22,6 +22,12 @@ type WeeklyRow = {
   haftalik_beklenen: string;
   haftalik_bakiye: string;
 };
+type UnmatchedRow = {
+  personel: string;
+  tarih_saat: string;
+  durum: "G" | "C";
+  neden: string;
+};
 
 const DAILY_TARGET_MIN = 8 * 60 + 30;
 const HALF_DAY_TARGET_MIN = DAILY_TARGET_MIN / 2;
@@ -156,6 +162,7 @@ export default function PdksPage() {
   const [cleanRecords, setCleanRecords] = useState<PairRecord[]>([]);
   const [dailyRows, setDailyRows] = useState<DailyRow[]>([]);
   const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
+  const [unmatchedRows, setUnmatchedRows] = useState<UnmatchedRow[]>([]);
 
   const [selectedPerson, setSelectedPerson] = useState("");
   const [manualMovements, setManualMovements] = useState<Array<{ personel: string; datetime: Date; durum: "G" | "C" }>>([]);
@@ -254,25 +261,65 @@ export default function PdksPage() {
         byPerson.get(m.personel)!.push({ datetime: m.datetime, durum: m.durum });
       });
       const pairs: PairRecord[] = [];
+      const unmatched: UnmatchedRow[] = [];
       [...byPerson.entries()].forEach(([personel, list]) => {
         list.sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
         let open: Date | null = null;
         list.forEach((x) => {
           if (x.durum === "G") {
-            // Coklu giris durumunda en guncel girisi baz al.
+            // Coklu giris gelirse onceki acik giris eslesememis sayilir.
+            if (open) {
+              unmatched.push({
+                personel,
+                tarih_saat: fmtISODateTime(open),
+                durum: "G",
+                neden: "Cikis bulunamadi (ardisik giris).",
+              });
+            }
             open = x.datetime;
             return;
           }
-          if (!open) return;
+          if (!open) {
+            unmatched.push({
+              personel,
+              tarih_saat: fmtISODateTime(x.datetime),
+              durum: "C",
+              neden: "Giris bulunamadi.",
+            });
+            return;
+          }
           const diffMin = Math.round((x.datetime.getTime() - open.getTime()) / 60000);
           if (diffMin > 0 && diffMin <= MAX_SHIFT_MIN) {
             // Ayni gun + geceyi asan (24:00 sonrasi) vardiyalar burada eslesir.
             pairs.push({ personel, giris: open, cikis: x.datetime });
+          } else {
+            unmatched.push({
+              personel,
+              tarih_saat: fmtISODateTime(open),
+              durum: "G",
+              neden: "Uygun cikis bulunamadi (sure limiti/asiri gec cikis).",
+            });
+            unmatched.push({
+              personel,
+              tarih_saat: fmtISODateTime(x.datetime),
+              durum: "C",
+              neden: "Giris-cikis suresi gecersiz.",
+            });
           }
           open = null;
         });
+        if (open) {
+          unmatched.push({
+            personel,
+            tarih_saat: fmtISODateTime(open),
+            durum: "G",
+            neden: "Cikis bulunamadi.",
+          });
+        }
       });
       setCleanRecords(pairs);
+      unmatched.sort((a, b) => (a.personel === b.personel ? a.tarih_saat.localeCompare(b.tarih_saat) : a.personel.localeCompare(b.personel, "tr")));
+      setUnmatchedRows(unmatched);
       setPairCount(pairs.length);
 
       // Mazeret map from existing app data (Supabase izinler + personel)
@@ -397,36 +444,69 @@ export default function PdksPage() {
 
   function addManualMovement() {
     const personel = manualForm.personel.trim();
-    if (!personel) {
-      setError("Manuel hareket icin personel gerekli.");
-      return;
-    }
-    if (!manualForm.tarih || !manualForm.saat) {
-      setError("Manuel hareket icin tarih ve saat gerekli.");
-      return;
-    }
-    const dt = new Date(`${manualForm.tarih}T${manualForm.saat}:00`);
-    if (Number.isNaN(dt.getTime())) {
-      setError("Manuel hareket tarihi/saati gecersiz.");
-      return;
-    }
-    const duplicate = manualMovements.some(
-      (m) => normalizeText(m.personel) === normalizeText(personel)
-        && m.datetime.getTime() === dt.getTime()
-        && m.durum === manualForm.durum,
-    );
-    if (duplicate) {
-      setError("Ayni personel, tarih-saat ve durum icin manuel hareket zaten var.");
-      return;
-    }
-    setError("");
-    setManualMovements((prev) => [...prev, { personel, datetime: dt, durum: manualForm.durum }]);
+    const ok = addManualMovementFromValues(personel, manualForm.tarih, manualForm.saat, manualForm.durum);
+    if (!ok) return;
     setManualForm((prev) => ({ ...prev, saat: "" }));
     setNotice("Manuel hareket eklendi. Hesapla ile dahil edilir.");
   }
 
   function removeManualMovement(index: number) {
     setManualMovements((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function addManualMovementFromValues(personelRaw: string, tarih: string, saat: string, durum: "G" | "C"): boolean {
+    const personel = personelRaw.trim();
+    if (!personel) {
+      setError("Manuel hareket icin personel gerekli.");
+      return false;
+    }
+    if (!tarih || !saat) {
+      setError("Manuel hareket icin tarih ve saat gerekli.");
+      return false;
+    }
+    const dt = new Date(`${tarih}T${saat}:00`);
+    if (Number.isNaN(dt.getTime())) {
+      setError("Manuel hareket tarihi/saati gecersiz.");
+      return false;
+    }
+    const duplicate = manualMovements.some(
+      (m) => normalizeText(m.personel) === normalizeText(personel)
+        && m.datetime.getTime() === dt.getTime()
+        && m.durum === durum,
+    );
+    if (duplicate) {
+      setError("Ayni personel, tarih-saat ve durum icin manuel hareket zaten var.");
+      return false;
+    }
+    setError("");
+    setManualMovements((prev) => [...prev, { personel, datetime: dt, durum }]);
+    return true;
+  }
+
+  function prefillManualFormFromUnmatched(row: UnmatchedRow) {
+    const [tarih = "", saat = ""] = row.tarih_saat.split(" ");
+    setManualForm({
+      personel: row.personel,
+      tarih,
+      saat,
+      durum: row.durum === "G" ? "C" : "G",
+    });
+    setError("");
+    setNotice("Duzeltme formu dolduruldu. Kontrol edip Hareket Ekle'ye basin.");
+  }
+
+  function quickFixFromUnmatched(row: UnmatchedRow) {
+    const [tarih = "", saat = ""] = row.tarih_saat.split(" ");
+    const hedefDurum: "G" | "C" = row.durum === "G" ? "C" : "G";
+    const ok = addManualMovementFromValues(row.personel, tarih, saat, hedefDurum);
+    if (!ok) return;
+    setManualForm({
+      personel: row.personel,
+      tarih,
+      saat,
+      durum: hedefDurum,
+    });
+    setNotice("Duzelt + Ekle tamamlandi. Hesapla ile sonuca dahil edilir.");
   }
 
   const selectedDaily = useMemo(() => dailyRows.filter((r) => r.personel === selectedPerson), [dailyRows, selectedPerson]);
@@ -535,6 +615,56 @@ export default function PdksPage() {
                       <td className="border-b p-2 text-right">
                         <button className="rounded-md border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50" onClick={() => removeManualMovement(idx)}>
                           Sil
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold tracking-tight">Eslesmeyen Hareketler</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Giris-cikis eslesmesi olmayan satirlari gosterir. Bu kayitlari yukaridaki "Ek Hareket Tanimla" ile tamamlayabilirsiniz.
+          </p>
+          <div className="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className="border-b p-2 text-left">Personel</th>
+                  <th className="border-b p-2 text-left">Tarih Saat</th>
+                  <th className="border-b p-2 text-left">Durum</th>
+                  <th className="border-b p-2 text-left">Neden</th>
+                  <th className="border-b p-2 text-right">Aksiyon</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unmatchedRows.length === 0 ? (
+                  <tr>
+                    <td className="p-2 text-slate-500" colSpan={5}>Eslesmeyen hareket yok.</td>
+                  </tr>
+                ) : (
+                  unmatchedRows.map((r, idx) => (
+                    <tr key={`${r.personel}-${r.tarih_saat}-${r.durum}-${idx}`}>
+                      <td className="border-b p-2">{r.personel}</td>
+                      <td className="border-b p-2">{r.tarih_saat}</td>
+                      <td className="border-b p-2">{r.durum}</td>
+                      <td className="border-b p-2">{r.neden}</td>
+                      <td className="border-b p-2 text-right">
+                        <button
+                          className="rounded-md border border-sky-200 px-2 py-1 text-sky-700 hover:bg-sky-50"
+                          onClick={() => prefillManualFormFromUnmatched(r)}
+                        >
+                          Duzelt
+                        </button>
+                        <button
+                          className="ml-2 rounded-md border border-emerald-200 px-2 py-1 text-emerald-700 hover:bg-emerald-50"
+                          onClick={() => quickFixFromUnmatched(r)}
+                        >
+                          Duzelt + Ekle
                         </button>
                       </td>
                     </tr>
