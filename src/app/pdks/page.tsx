@@ -1078,12 +1078,16 @@ export default function PdksPage() {
                         const holidayDurum = holidayDayTypeMap[iso] === "full" ? "resmi tatil" : holidayDayTypeMap[iso] === "half" ? "arefe" : "";
                         const cellDurum = row?.durum || leaveDurum || holidayDurum;
                         const bakiyeMin = row ? hhmmToMinutes(row.bakiye) : 0;
-                        const bakiyeText = row ? row.bakiye : "";
-                        const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
-                        const calismaDisiVeKayitYok = calismaDisi && !row;
+                        const brutMin = row ? hhmmToMinutes(row.brut) : 0;
                         const d = new Date(`${iso}T00:00:00`);
                         const isPazar = d.getDay() === 0;
-                        const holiday = holidayDayTypeMap[iso];
+                        const holidayType = holidayDayTypeMap[iso];
+                        const nonWorkingDay = isPazar || holidayType === "full" || holidayType === "half";
+                        const noWorkOnNonWorkingDay = nonWorkingDay && brutMin <= 0;
+                        const bakiyeText = row && !noWorkOnNonWorkingDay ? row.bakiye : "";
+                        const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
+                        const calismaDisiVeKayitYok = calismaDisi && !row;
+                        const holiday = holidayType;
                         const cellBg =
                           holiday === "full"
                             ? "bg-slate-200"
