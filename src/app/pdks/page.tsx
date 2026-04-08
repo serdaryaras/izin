@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseClient, hasSupabaseEnv, type Tables } from "@/lib/supabase";
 
 type PairRecord = { personel: string; giris: Date; cikis: Date };
@@ -194,8 +194,10 @@ export default function PdksPage() {
   const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
   const [unmatchedRows, setUnmatchedRows] = useState<UnmatchedRow[]>([]);
   const [allMovements, setAllMovements] = useState<MovementRow[]>([]);
+  const [importedRawMovements, setImportedRawMovements] = useState<MovementRow[]>([]);
   const [deletedMovementIds, setDeletedMovementIds] = useState<string[]>([]);
   const [recalcVersion, setRecalcVersion] = useState(0);
+  const calcRunRef = useRef(0);
 
   const [manualMovements, setManualMovements] = useState<MovementRow[]>([]);
   const [manualForm, setManualForm] = useState({
@@ -206,92 +208,96 @@ export default function PdksPage() {
   });
 
   async function processAll() {
+    const runId = ++calcRunRef.current;
     setNotice("");
     setError("");
     try {
       if (!pdksFile) throw new Error("Ham PDKS dosyasi gerekli.");
-      const XLSX = await import("xlsx");
-      const buf = await pdksFile.arrayBuffer();
-      const ext = (pdksFile.name.split(".").pop() || "").toLowerCase();
+      let rawMovements = importedRawMovements;
+      if (rawMovements.length === 0) {
+        const XLSX = await import("xlsx");
+        const buf = await pdksFile.arrayBuffer();
+        const ext = (pdksFile.name.split(".").pop() || "").toLowerCase();
+        let rawSeq = 0;
+        const parsed: MovementRow[] = [];
 
-      let rawSeq = 0;
-      let movements: MovementRow[] = [];
-
-      const parseMovementRows = (rows: any[][]) => {
-        let headerIdx = -1;
-        let personel = -1;
-        let tarih = -1;
-        let saat = -1;
-        let durum = -1;
-        for (let i = 0; i < Math.min(rows.length, 20); i++) {
-          rows[i].forEach((v, idx) => {
-            const t = normalizeText(v);
-            if (t.includes("personel adi soyadi")) personel = idx;
-            else if (t === "tarih") tarih = idx;
-            else if (t === "saat") saat = idx;
-            else if (t === "durum") durum = idx;
-          });
-          if (personel >= 0 && tarih >= 0 && saat >= 0 && durum >= 0) {
-            headerIdx = i;
-            break;
+        const parseMovementRows = (rows: any[][]) => {
+          let headerIdx = -1;
+          let personel = -1;
+          let tarih = -1;
+          let saat = -1;
+          let durum = -1;
+          for (let i = 0; i < Math.min(rows.length, 20); i++) {
+            rows[i].forEach((v, idx) => {
+              const t = normalizeText(v);
+              if (t.includes("personel adi soyadi")) personel = idx;
+              else if (t === "tarih") tarih = idx;
+              else if (t === "saat") saat = idx;
+              else if (t === "durum") durum = idx;
+            });
+            if (personel >= 0 && tarih >= 0 && saat >= 0 && durum >= 0) {
+              headerIdx = i;
+              break;
+            }
           }
-        }
-        if (headerIdx === -1) throw new Error("Basliklar bulunamadi.");
+          if (headerIdx === -1) throw new Error("Basliklar bulunamadi.");
 
-        for (let i = headerIdx + 1; i < rows.length; i++) {
-          const row = rows[i];
-          const p = String(row[personel] ?? "").trim();
-          const d = excelDateToJS(XLSX, row[tarih]);
-          const t = excelDateToJS(XLSX, row[saat]);
-          const rawDurum = normalizeText(row[durum]);
-          const s: "G" | "C" | "" = rawDurum.startsWith("g")
-            ? "G"
-            : rawDurum.startsWith("c")
-              ? "C"
-              : "";
-          if (!p || !d || !s) continue;
-          let dt: Date | null = null;
-          if (d instanceof Date && t && typeof t === "object" && "timeOnly" in t) {
-            dt = new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.h, t.m, t.s || 0);
-          } else if (d instanceof Date && t instanceof Date) {
-            dt = new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.getHours(), t.getMinutes(), t.getSeconds());
-          } else if (d instanceof Date) {
-            dt = d;
+          for (let i = headerIdx + 1; i < rows.length; i++) {
+            const row = rows[i];
+            const p = String(row[personel] ?? "").trim();
+            const d = excelDateToJS(XLSX, row[tarih]);
+            const t = excelDateToJS(XLSX, row[saat]);
+            const rawDurum = normalizeText(row[durum]);
+            const s: "G" | "C" | "" = rawDurum.startsWith("g")
+              ? "G"
+              : rawDurum.startsWith("c")
+                ? "C"
+                : "";
+            if (!p || !d || !s) continue;
+            let dt: Date | null = null;
+            if (d instanceof Date && t && typeof t === "object" && "timeOnly" in t) {
+              dt = new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.h, t.m, t.s || 0);
+            } else if (d instanceof Date && t instanceof Date) {
+              dt = new Date(d.getFullYear(), d.getMonth(), d.getDate(), t.getHours(), t.getMinutes(), t.getSeconds());
+            } else if (d instanceof Date) {
+              dt = d;
+            }
+            if (!dt) continue;
+            parsed.push({
+              id: `raw-${rawSeq++}`,
+              source: "raw",
+              personel: p,
+              datetime: dt,
+              durum: s as "G" | "C",
+            });
           }
-          if (!dt) continue;
-          movements.push({
-            id: `raw-${rawSeq++}`,
-            source: "raw",
-            personel: p,
-            datetime: dt,
-            durum: s as "G" | "C",
+        };
+
+        if (ext === "csv") {
+          const text = new TextDecoder("windows-1254").decode(buf);
+          try {
+            parseMovementRows(splitCsv(text, ";") as any[][]);
+          } catch {
+            parseMovementRows(splitCsv(text, ",") as any[][]);
+          }
+        } else {
+          const wb = XLSX.read(buf, { type: "array", cellDates: true });
+          wb.SheetNames.forEach((name) => {
+            const ws = wb.Sheets[name];
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }) as any[][];
+            parseMovementRows(rows);
           });
         }
-      };
-
-      if (ext === "csv") {
-        const text = new TextDecoder("windows-1254").decode(buf);
-        try {
-          parseMovementRows(splitCsv(text, ";") as any[][]);
-        } catch {
-          parseMovementRows(splitCsv(text, ",") as any[][]);
-        }
-      } else {
-        const wb = XLSX.read(buf, { type: "array", cellDates: true });
-        wb.SheetNames.forEach((name) => {
-          const ws = wb.Sheets[name];
-          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }) as any[][];
-          parseMovementRows(rows);
-        });
+        rawMovements = parsed;
       }
 
       // Manuel eklenen hareketleri de ham akisa dahil et.
-      movements.push(...manualMovements);
+      const movements = [...rawMovements, ...manualMovements];
       const activeMovements = movements.filter((m) => !deletedMovementIds.includes(m.id));
-      setAllMovements(activeMovements.slice().sort((a, b) => {
+      const nextAllMovements = activeMovements.slice().sort((a, b) => {
         if (a.personel !== b.personel) return a.personel.localeCompare(b.personel, "tr");
         return a.datetime.getTime() - b.datetime.getTime();
-      }));
+      });
 
       // Pair G-C
       const byPerson = new Map<string, Array<{ datetime: Date; durum: "G" | "C" }>>();
@@ -357,10 +363,7 @@ export default function PdksPage() {
           });
         }
       });
-      setCleanRecords(pairs);
       unmatched.sort((a, b) => (a.personel === b.personel ? a.tarih_saat.localeCompare(b.tarih_saat) : a.personel.localeCompare(b.personel, "tr")));
-      setUnmatchedRows(unmatched);
-      setPairCount(pairs.length);
 
       // Mazeret map from existing app data (Supabase izinler + personel)
       const mazeretMap = new Map<string, string>();
@@ -381,7 +384,7 @@ export default function PdksPage() {
           }
         });
       }
-      setMazeretCount(mazeretMap.size);
+      const nextMazeretCount = mazeretMap.size;
 
       // Daily/weekly calculations
       const byP = new Map<string, PairRecord[]>();
@@ -473,11 +476,20 @@ export default function PdksPage() {
 
       dRows.sort((a, b) => (a.personel === b.personel ? a.tarih.localeCompare(b.tarih) : a.personel.localeCompare(b.personel, "tr")));
       wRows.sort((a, b) => (a.personel === b.personel ? a.hafta.localeCompare(b.hafta) : a.personel.localeCompare(b.personel, "tr")));
+      const nextPersonCount = [...new Set(dRows.map((x) => x.personel))].length;
+      if (runId !== calcRunRef.current) return;
+      setImportedRawMovements(rawMovements);
+      setAllMovements(nextAllMovements);
+      setCleanRecords(pairs);
+      setUnmatchedRows(unmatched);
+      setPairCount(pairs.length);
+      setMazeretCount(nextMazeretCount);
       setDailyRows(dRows);
       setWeeklyRows(wRows);
-      setPersonCount([...new Set(dRows.map((x) => x.personel))].length);
+      setPersonCount(nextPersonCount);
       setNotice("Hesap tamamlandi.");
     } catch (e) {
+      if (runId !== calcRunRef.current) return;
       setError(e instanceof Error ? e.message : "Islem sirasinda hata olustu.");
     }
   }
@@ -612,8 +624,10 @@ export default function PdksPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ham PDKS Dosyasi</p>
               <input className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" type="file" accept=".csv,.xls,.xlsx" onChange={(e) => {
                 setPdksFile(e.target.files?.[0] ?? null);
+                setImportedRawMovements([]);
                 setDeletedMovementIds([]);
                 setAllMovements([]);
+                setManualMovements([]);
               }} />
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
