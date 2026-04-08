@@ -212,6 +212,7 @@ export default function PdksPage() {
     saat: "",
     durum: "G" as "G" | "C",
   });
+  const [selectedMonth, setSelectedMonth] = useState("");
 
   async function processAll() {
     const runId = ++calcRunRef.current;
@@ -658,6 +659,40 @@ export default function PdksPage() {
       .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
       .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
   }, [allMovements, manualForm.personel, manualForm.tarih]);
+  const monthOptions = useMemo(() => {
+    const set = new Set<string>();
+    dailyRows.forEach((r) => set.add(r.tarih.slice(0, 7)));
+    return [...set].sort();
+  }, [dailyRows]);
+  useEffect(() => {
+    if (monthOptions.length === 0) {
+      if (selectedMonth) setSelectedMonth("");
+      return;
+    }
+    if (selectedMonth && monthOptions.includes(selectedMonth)) return;
+    const fromForm = manualForm.tarih ? manualForm.tarih.slice(0, 7) : "";
+    if (fromForm && monthOptions.includes(fromForm)) {
+      setSelectedMonth(fromForm);
+      return;
+    }
+    setSelectedMonth(monthOptions[monthOptions.length - 1]);
+  }, [monthOptions, selectedMonth, manualForm.tarih]);
+  const monthlyBalanceRows = useMemo(() => {
+    if (!selectedMonth) return [];
+    const map = new Map<string, number>();
+    dailyRows.forEach((r) => {
+      if (!r.tarih.startsWith(selectedMonth)) return;
+      const diff = hhmmToMinutes(r.net) - hhmmToMinutes(r.beklenen);
+      map.set(r.personel, (map.get(r.personel) ?? 0) + diff);
+    });
+    return [...map.entries()]
+      .map(([personel, bakiyeMin]) => ({ personel, bakiyeMin }))
+      .sort((a, b) => a.personel.localeCompare(b.personel, "tr"));
+  }, [dailyRows, selectedMonth]);
+  const weeklyRowsForMonth = useMemo(() => {
+    if (!selectedMonth) return weeklyRows;
+    return weeklyRows.filter((r) => r.hafta_etiket.includes(selectedMonth));
+  }, [weeklyRows, selectedMonth]);
   return (
     <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
       <div className="mx-auto max-w-[1300px] space-y-5">
@@ -721,43 +756,6 @@ export default function PdksPage() {
                           Duzenle
                         </button>
                       </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold tracking-tight">Haftalik Calisma ve Fazla Mesai</h2>
-          <p className="mt-1 text-sm text-slate-500">Pazartesi baslangicli hafta toplamlari: net, beklenen ve fazla mesai.</p>
-          <div className="mt-3 max-h-80 overflow-auto rounded-xl border border-slate-200">
-            <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-slate-50">
-                <tr>
-                  <th className="border-b p-2 text-left">Personel</th>
-                  <th className="border-b p-2 text-left">Hafta</th>
-                  <th className="border-b p-2 text-right">Net</th>
-                  <th className="border-b p-2 text-right">Beklenen</th>
-                  <th className="border-b p-2 text-right">Bakiye</th>
-                  <th className="border-b p-2 text-right">Fazla Mesai</th>
-                </tr>
-              </thead>
-              <tbody>
-                {weeklyRows.length === 0 ? (
-                  <tr>
-                    <td className="p-2 text-slate-500" colSpan={6}>Haftalik sonuc yok.</td>
-                  </tr>
-                ) : (
-                  weeklyRows.map((r) => (
-                    <tr key={`${r.personel}-${r.hafta}`}>
-                      <td className="border-b p-2">{r.personel}</td>
-                      <td className="border-b p-2">{r.hafta_etiket}</td>
-                      <td className="border-b p-2 text-right">{r.haftalik_net}</td>
-                      <td className="border-b p-2 text-right">{r.haftalik_beklenen}</td>
-                      <td className="border-b p-2 text-right">{r.haftalik_bakiye}</td>
-                      <td className="border-b p-2 text-right font-semibold">{r.haftalik_fazla_mesai}</td>
                     </tr>
                   ))
                 )}
@@ -846,6 +844,79 @@ export default function PdksPage() {
             </div>
           </div>
 
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold tracking-tight">Haftalik Calisma ve Fazla Mesai</h2>
+          <p className="mt-1 text-sm text-slate-500">Pazartesi baslangicli hafta toplamlari ve secili ay icin personel bazli +/- bakiye.</p>
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-xs text-slate-500">Ay:</span>
+            <select
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+            >
+              {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </div>
+          <div className="mt-3 max-h-52 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className="border-b p-2 text-left">Personel</th>
+                  <th className="border-b p-2 text-right">Aylik Bakiye (+/-)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthlyBalanceRows.length === 0 ? (
+                  <tr>
+                    <td className="p-2 text-slate-500" colSpan={2}>Secili ay icin bakiye yok.</td>
+                  </tr>
+                ) : (
+                  monthlyBalanceRows.map((r) => (
+                    <tr key={`${r.personel}-${selectedMonth}`}>
+                      <td className="border-b p-2">{r.personel}</td>
+                      <td className={`border-b p-2 text-right font-semibold ${r.bakiyeMin >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                        {minutesToHHMM(r.bakiyeMin)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 max-h-80 overflow-auto rounded-xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr>
+                  <th className="border-b p-2 text-left">Personel</th>
+                  <th className="border-b p-2 text-left">Hafta</th>
+                  <th className="border-b p-2 text-right">Net Calisma</th>
+                  <th className="border-b p-2 text-right">Beklenen</th>
+                  <th className="border-b p-2 text-right">Bakiye (+/-)</th>
+                  <th className="border-b p-2 text-right">Fazla Mesai (+)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weeklyRowsForMonth.length === 0 ? (
+                  <tr>
+                    <td className="p-2 text-slate-500" colSpan={6}>Haftalik sonuc yok.</td>
+                  </tr>
+                ) : (
+                  weeklyRowsForMonth.map((r) => (
+                    <tr key={`${r.personel}-${r.hafta}`}>
+                      <td className="border-b p-2">{r.personel}</td>
+                      <td className="border-b p-2">{r.hafta_etiket}</td>
+                      <td className="border-b p-2 text-right">{r.haftalik_net}</td>
+                      <td className="border-b p-2 text-right">{r.haftalik_beklenen}</td>
+                      <td className={`border-b p-2 text-right font-semibold ${r.haftalik_bakiye.startsWith("-") ? "text-rose-700" : "text-emerald-700"}`}>{r.haftalik_bakiye}</td>
+                      <td className="border-b p-2 text-right font-semibold text-emerald-700">{r.haftalik_fazla_mesai}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </section>
 
       </div>
