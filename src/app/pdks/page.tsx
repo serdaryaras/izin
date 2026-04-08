@@ -98,6 +98,15 @@ function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: tru
     if (m) return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
     m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
     if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+    // Excel display format often arrives as m/d/yy (e.g. 3/2/26)
+    m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+    if (m) {
+      const mm = +m[1];
+      const dd = +m[2];
+      const yy = +m[3];
+      const yyyy = yy < 100 ? 2000 + yy : yy;
+      return new Date(yyyy, mm - 1, dd);
+    }
     m = t.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if (m) return { timeOnly: true, h: +m[1], m: +m[2], s: +(m[3] || 0) };
     m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -395,35 +404,38 @@ export default function PdksPage() {
   }, [cleanRecords, selectedPerson]);
 
   return (
-    <div className="min-h-screen bg-slate-50 p-5 text-slate-900">
+    <div className="min-h-screen bg-slate-100/70 p-5 text-slate-900">
       <div className="mx-auto max-w-[1300px] space-y-5">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
-          <h1 className="text-2xl font-bold">PDKS - Puantaj Raporu</h1>
-          <p className="mt-2 text-sm text-slate-500">Mazeretler mevcut uygulamadaki Supabase kayitlarindan cekilir.</p>
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-bold tracking-tight">PDKS - Puantaj Raporu</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Ham PDKS dosyasini okuyup gunluk-haftalik denge hesaplar. Mazeretler mevcut uygulamadaki
+            Supabase kayitlarindan cekilir.
+          </p>
           <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <div className="rounded-xl border border-slate-200 p-4">
-              <b>Ham PDKS Dosyasi</b>
-              <input className="mt-3 w-full" type="file" accept=".csv,.xls,.xlsx" onChange={(e) => setPdksFile(e.target.files?.[0] ?? null)} />
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ham PDKS Dosyasi</p>
+              <input className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" type="file" accept=".csv,.xls,.xlsx" onChange={(e) => setPdksFile(e.target.files?.[0] ?? null)} />
             </div>
-            <div className="rounded-xl border border-slate-200 p-4">
-              <b>Eslesen Cift</b>
-              <div className="mt-2 text-3xl font-bold">{pairCount}</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Eslesen Cift</p>
+              <div className="mt-2 text-3xl font-bold tracking-tight">{pairCount}</div>
             </div>
-            <div className="rounded-xl border border-slate-200 p-4">
-              <b>Personel / Mazeret</b>
-              <div className="mt-2 text-xl font-bold">{personCount} / {mazeretCount}</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Personel / Mazeret</p>
+              <div className="mt-2 text-xl font-bold tracking-tight">{personCount} / {mazeretCount}</div>
             </div>
           </div>
           <div className="mt-4 flex gap-2">
-            <button className="rounded-xl bg-slate-900 px-4 py-2 text-white" onClick={() => void processAll()}>Hesapla</button>
+            <button className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800" onClick={() => void processAll()}>Hesapla</button>
           </div>
           {notice ? <div className="mt-3 rounded-lg bg-emerald-50 p-3 text-emerald-700">{notice}</div> : null}
           {error ? <div className="mt-3 rounded-lg bg-rose-50 p-3 text-rose-700">{error}</div> : null}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
-          <h2 className="text-lg font-semibold">Secili Personel Kontrol Paneli</h2>
-          <select className="mt-3 w-full rounded-xl border border-slate-300 p-2 md:w-[420px]" value={selectedPerson} onChange={(e) => setSelectedPerson(e.target.value)}>
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold tracking-tight">Secili Personel Kontrol Paneli</h2>
+          <select className="mt-3 w-full rounded-xl border border-slate-300 bg-white p-2.5 text-sm md:w-[420px]" value={selectedPerson} onChange={(e) => setSelectedPerson(e.target.value)}>
             <option value="">Personel secin</option>
             {personOptions.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
@@ -432,15 +444,15 @@ export default function PdksPage() {
               <h3 className="mb-2 font-semibold">Gunluk</h3>
               <div className="max-h-80 overflow-auto text-xs">
                 <table className="w-full border-collapse">
-                  <thead><tr><th className="border-b p-1 text-left">Tarih</th><th className="border-b p-1 text-right">Net</th><th className="border-b p-1 text-right">Beklenen</th><th className="border-b p-1 text-right">Bakiye</th><th className="border-b p-1 text-left">Durum</th></tr></thead>
+                  <thead className="sticky top-0 bg-slate-50"><tr><th className="border-b p-1.5 text-left">Tarih</th><th className="border-b p-1.5 text-right">Net</th><th className="border-b p-1.5 text-right">Beklenen</th><th className="border-b p-1.5 text-right">Bakiye</th><th className="border-b p-1.5 text-left">Durum</th></tr></thead>
                   <tbody>
                     {selectedDaily.map((r) => (
                       <tr key={`${r.personel}-${r.tarih}`} className={isSundayDateKey(r.tarih) ? "bg-red-50" : ""}>
-                        <td className="border-b p-1">{r.tarih}</td>
-                        <td className="border-b p-1 text-right">{r.net}</td>
-                        <td className="border-b p-1 text-right">{r.beklenen}</td>
-                        <td className="border-b p-1 text-right">{r.bakiye}</td>
-                        <td className="border-b p-1">{r.durum || "-"}</td>
+                        <td className="border-b p-1.5">{r.tarih}</td>
+                        <td className="border-b p-1.5 text-right">{r.net}</td>
+                        <td className="border-b p-1.5 text-right">{r.beklenen}</td>
+                        <td className="border-b p-1.5 text-right font-medium">{r.bakiye}</td>
+                        <td className="border-b p-1.5">{r.durum || "-"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -451,9 +463,9 @@ export default function PdksPage() {
               <h3 className="mb-2 font-semibold">Haftalik</h3>
               <div className="max-h-80 overflow-auto text-xs">
                 <table className="w-full border-collapse">
-                  <thead><tr><th className="border-b p-1 text-left">Hafta</th><th className="border-b p-1 text-right">Net</th><th className="border-b p-1 text-right">Beklenen</th><th className="border-b p-1 text-right">Bakiye</th></tr></thead>
+                  <thead className="sticky top-0 bg-slate-50"><tr><th className="border-b p-1.5 text-left">Hafta</th><th className="border-b p-1.5 text-right">Net</th><th className="border-b p-1.5 text-right">Beklenen</th><th className="border-b p-1.5 text-right">Bakiye</th></tr></thead>
                   <tbody>
-                    {selectedWeekly.map((r) => <tr key={`${r.personel}-${r.hafta}`}><td className="border-b p-1">{r.hafta_etiket}</td><td className="border-b p-1 text-right">{r.haftalik_net}</td><td className="border-b p-1 text-right">{r.haftalik_beklenen}</td><td className="border-b p-1 text-right">{r.haftalik_bakiye}</td></tr>)}
+                    {selectedWeekly.map((r) => <tr key={`${r.personel}-${r.hafta}`}><td className="border-b p-1.5">{r.hafta_etiket}</td><td className="border-b p-1.5 text-right">{r.haftalik_net}</td><td className="border-b p-1.5 text-right">{r.haftalik_beklenen}</td><td className="border-b p-1.5 text-right font-medium">{r.haftalik_bakiye}</td></tr>)}
                   </tbody>
                 </table>
               </div>
@@ -463,20 +475,20 @@ export default function PdksPage() {
             <h3 className="mb-2 font-semibold">Aylik Ozet</h3>
             <div className="max-h-64 overflow-auto text-xs">
               <table className="w-full border-collapse">
-                <thead><tr><th className="border-b p-1 text-left">Ay</th><th className="border-b p-1 text-right">Net</th><th className="border-b p-1 text-right">Beklenen</th><th className="border-b p-1 text-right">Bakiye</th></tr></thead>
+                <thead className="sticky top-0 bg-slate-50"><tr><th className="border-b p-1.5 text-left">Ay</th><th className="border-b p-1.5 text-right">Net</th><th className="border-b p-1.5 text-right">Beklenen</th><th className="border-b p-1.5 text-right">Bakiye</th></tr></thead>
                 <tbody>
-                  {selectedMonthly.map(([ay, v]) => <tr key={ay}><td className="border-b p-1">{ay}</td><td className="border-b p-1 text-right">{minutesToHHMM(v.net)}</td><td className="border-b p-1 text-right">{minutesToHHMM(v.expected)}</td><td className="border-b p-1 text-right">{minutesToHHMM(v.net - v.expected)}</td></tr>)}
+                  {selectedMonthly.map(([ay, v]) => <tr key={ay}><td className="border-b p-1.5">{ay}</td><td className="border-b p-1.5 text-right">{minutesToHHMM(v.net)}</td><td className="border-b p-1.5 text-right">{minutesToHHMM(v.expected)}</td><td className="border-b p-1.5 text-right font-medium">{minutesToHHMM(v.net - v.expected)}</td></tr>)}
                 </tbody>
               </table>
             </div>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold">
             Temiz Kayitlar{selectedPerson ? ` - ${selectedPerson}` : " (Tum Personeller)"}
           </h2>
-          <pre className="mt-2 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
+          <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
 {["personel,giris,cikis", ...previewCleanRecords.map((r) => `${r.personel},${fmtISODateTime(r.giris)},${fmtISODateTime(r.cikis)}`)].join("\n")}
           </pre>
         </section>
