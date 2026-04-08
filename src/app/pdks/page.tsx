@@ -223,7 +223,7 @@ export default function PdksPage() {
         const wb = XLSX.read(buf, { type: "array", cellDates: true });
         wb.SheetNames.forEach((name) => {
           const ws = wb.Sheets[name];
-          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" }) as any[][];
+          const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }) as any[][];
           parseMovementRows(rows);
         });
       }
