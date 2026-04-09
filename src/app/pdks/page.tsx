@@ -138,6 +138,7 @@ function getTakvimGunGolgeClass(durumRaw: string): string {
   const durum = normalizeText(durumRaw);
   if (!durum) return "";
   // Ana personel izin takvimindeki renk paletiyle eslesik.
+  if (durum.includes("mucbir") || durum.includes("idari izin")) return "bg-fuchsia-200 text-fuchsia-900";
   if (durum.includes("arefe")) return "bg-amber-50 text-slate-800";
   if (durum.includes("resmi") || durum.includes("tatil")) return "bg-slate-200 text-slate-800";
   if (durum.includes("rapor")) return "bg-pink-500 text-white";
@@ -148,6 +149,7 @@ function getTakvimGunGolgeClass(durumRaw: string): string {
 function izinKodKisaltmaFromDurum(durumRaw: string): string {
   const d = normalizeText(durumRaw);
   if (!d) return "";
+  if (d.includes("mucbir") || d.includes("idari izin")) return "M";
   if (d.includes("yillik") || d.includes("izin")) return "Y";
   if (d.includes("rapor")) return "R";
   if (d.includes("dis")) return "D";
@@ -166,6 +168,19 @@ function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: tru
   }
   if (typeof value === "string") {
     const t = value.trim();
+    // Bazi Excel dosyalarinda saat/tarih hucreleri metin icinde sayisal seri olarak gelebilir.
+    if (/^\d+(\.\d+)?$/.test(t)) {
+      const n = Number(t);
+      if (!Number.isNaN(n)) {
+        const parsed = XLSX.SSF.parse_date_code(n);
+        if (parsed) {
+          if (parsed.y && parsed.m && parsed.d && (parsed.y > 1900 || parsed.m > 1 || parsed.d > 1)) {
+            return new Date(parsed.y, parsed.m - 1, parsed.d, parsed.H || 0, parsed.M || 0, parsed.S || 0);
+          }
+          return { timeOnly: true, h: parsed.H || 0, m: parsed.M || 0, s: parsed.S || 0 };
+        }
+      }
+    }
     let m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if (m) return new Date(+m[3], +m[2] - 1, +m[1], +m[4], +m[5], +(m[6] || 0));
     m = t.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
@@ -643,7 +658,7 @@ export default function PdksPage() {
           const idariIzinMin = idariIzinByDay.get(dayKey) ?? 0;
           if (expected > 0 && idariIzinMin > 0) {
             expected = Math.max(0, expected - idariIzinMin);
-            if (!gunDurumu) gunDurumu = "idari izin";
+            if (!gunDurumu) gunDurumu = "mucbir sebep";
           }
 
           const ws = new Date(date);
