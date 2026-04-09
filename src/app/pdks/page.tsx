@@ -255,6 +255,7 @@ export default function PdksPage() {
   const calcRunRef = useRef(0);
 
   const [manualMovements, setManualMovements] = useState<MovementRow[]>([]);
+  const aylikBakiyeKartRef = useRef<HTMLDivElement | null>(null);
   const [manualForm, setManualForm] = useState({
     personel: "",
     tarih: "",
@@ -814,6 +815,83 @@ export default function PdksPage() {
     setError("");
   }
 
+  function exportStamp(): string {
+    const now = new Date();
+    return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+  }
+
+  async function captureAylikBakiyeKartCanvas(): Promise<HTMLCanvasElement> {
+    const target = aylikBakiyeKartRef.current;
+    if (!target) throw new Error("Aylik Mesai Bakiye Karti bulunamadi.");
+    const { domToCanvas } = await import("modern-screenshot");
+    const wrap = target.querySelector("[data-aylik-bakiye-table-wrap]");
+    if (wrap instanceof HTMLElement) {
+      const prev = wrap.style.cssText;
+      wrap.style.overflow = "visible";
+      wrap.style.maxHeight = "none";
+      try {
+        return await domToCanvas(target, {
+          scale: 2,
+          backgroundColor: "#ffffff",
+        });
+      } finally {
+        wrap.style.cssText = prev;
+      }
+    }
+    return domToCanvas(target, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+    });
+  }
+
+  function downloadCanvasPng(canvas: HTMLCanvasElement, fileName: string) {
+    const a = document.createElement("a");
+    a.href = canvas.toDataURL("image/png");
+    a.download = fileName;
+    a.click();
+  }
+
+  async function downloadCanvasPdf(canvas: HTMLCanvasElement, fileName: string) {
+    const { default: jsPDF } = await import("jspdf");
+    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const imgData = canvas.toDataURL("image/png");
+    const iw = canvas.width;
+    const ih = canvas.height;
+    const maxW = pageW - 2 * margin;
+    const maxH = pageH - 2 * margin;
+    const ratio = Math.min(maxW / iw, maxH / ih);
+    const drawW = iw * ratio;
+    const drawH = ih * ratio;
+    const x = margin + (maxW - drawW) / 2;
+    const y = margin + (maxH - drawH) / 2;
+    pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
+    pdf.save(fileName);
+  }
+
+  async function exportAylikBakiyeKart(format: "png" | "pdf") {
+    if (!takvimAy || takvimPersoneller.length === 0 || takvimGunleri.length === 0) {
+      setError("Disa aktarma icin aylik bakiye kartinda veri olmali.");
+      return;
+    }
+    try {
+      const canvas = await captureAylikBakiyeKartCanvas();
+      const fileBase = `aylik-mesai-bakiye-karti-${takvimAy}-${exportStamp()}`;
+      if (format === "png") {
+        downloadCanvasPng(canvas, `${fileBase}.png`);
+        setNotice("Aylik Mesai Bakiye Karti PNG olarak indirildi.");
+      } else {
+        await downloadCanvasPdf(canvas, `${fileBase}.pdf`);
+        setNotice("Aylik Mesai Bakiye Karti PDF olarak indirildi.");
+      }
+      setError("");
+    } catch {
+      setError("Aylik Mesai Bakiye Karti disa aktarma sirasinda hata olustu.");
+    }
+  }
+
   async function exportFinalMovementsAsXlsx() {
     if (allMovements.length === 0) {
       setError("Disa aktarma icin once veri hesaplanmali.");
@@ -1108,20 +1186,36 @@ export default function PdksPage() {
 
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" ref={aylikBakiyeKartRef}>
           <h2 className="text-lg font-semibold tracking-tight">Aylik Mesai Bakiye Karti</h2>
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-xs text-slate-500">Ay:</span>
-            <select
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
-              value={takvimAy}
-              onChange={(e) => setTakvimAy(e.target.value)}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">Ay:</span>
+              <select
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+                value={takvimAy}
+                onChange={(e) => setTakvimAy(e.target.value)}
+              >
+                {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <button
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void exportAylikBakiyeKart("png")}
+              disabled={!takvimAy || takvimPersoneller.length === 0 || takvimGunleri.length === 0}
             >
-              {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
+              PNG Cikti
+            </button>
+            <button
+              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void exportAylikBakiyeKart("pdf")}
+              disabled={!takvimAy || takvimPersoneller.length === 0 || takvimGunleri.length === 0}
+            >
+              PDF Cikti
+            </button>
           </div>
           <div className="mt-3 overflow-hidden rounded-xl ring-[0.5px] ring-slate-400">
-            <div className="overflow-auto">
+            <div className="overflow-auto" data-aylik-bakiye-table-wrap>
             <table className="w-full table-fixed border-collapse text-xs">
               <colgroup>
                 <col style={{ width: "10rem" }} />
