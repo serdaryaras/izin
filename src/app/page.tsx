@@ -121,6 +121,10 @@ function maskDateInputFlexible(raw: string): string {
   return s.slice(0, 10);
 }
 
+function formatGunDegeri(v: number): string {
+  return Math.round(v * 10) % 10 === 0 ? String(Math.round(v)) : String(v).replace(".", ",");
+}
+
 /**
  * Tam secilen metin ekrandayken sonuna eklenen yaziyi yapistirma:
  * or. "ülkem ünlü" + "em" -> yalnizca "em" (yeni arama), secim sifirlanir.
@@ -958,8 +962,7 @@ export default function Home() {
         .map((kod) => {
           const v = toplamlar.get(kod) ?? 0;
           if (v <= 0) return "";
-          const txt =
-            Math.round(v * 10) % 10 === 0 ? String(Math.round(v)) : String(v).replace(".", ",");
+          const txt = formatGunDegeri(v);
           return `${izinKisaltma[kod]}=${txt}`;
         })
         .filter(Boolean)
@@ -967,6 +970,31 @@ export default function Home() {
       out.set(monthIdx, ozet || "-");
     }
     return out;
+  }, [seciliIzinPersonel, mazeretTakvimYil, izinler, tatilMap]);
+
+  const mazeretYillikOzet = useMemo(() => {
+    if (!seciliIzinPersonel) return null;
+    const yilBas = `${mazeretTakvimYil}-01-01`;
+    const yilSon = `${mazeretTakvimYil}-12-31`;
+    const kodSira: IzinKod[] = ["yillik", "rapor", "dis", "evlilik", "cenaze", "dogum"];
+    const turBazli = new Map<IzinKod, number>();
+
+    for (const iz of izinler) {
+      if (iz.personel_id !== seciliIzinPersonel.id) continue;
+      if (iz.bitis < seciliIzinPersonel.ise_giris) continue;
+      if (iz.bitis < yilBas || iz.baslangic > yilSon) continue;
+      const from = iz.baslangic > yilBas ? iz.baslangic : yilBas;
+      const to = iz.bitis < yilSon ? iz.bitis : yilSon;
+      if (from > to) continue;
+      const gun = yearlyLeaveCharge(from, to, tatilMap);
+      turBazli.set(iz.izin_tipi, (turBazli.get(iz.izin_tipi) ?? 0) + gun);
+    }
+
+    const kirilim = kodSira
+      .map((kod) => ({ kod, gun: turBazli.get(kod) ?? 0 }))
+      .filter((x) => x.gun > 0);
+    const toplamGun = kirilim.reduce((s, x) => s + x.gun, 0);
+    return { kirilim, toplamGun };
   }, [seciliIzinPersonel, mazeretTakvimYil, izinler, tatilMap]);
 
   async function handlePersonelInsert(e: FormEvent<HTMLFormElement>) {
@@ -1972,6 +2000,21 @@ export default function Home() {
                     Secilen tur rengi tiklanan gunlerde kullanilir. Personel seciliyse mevcut kayitlar kisaltma ile
                     gosterilir.
                   </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    {(["yillik", "rapor", "dis", "evlilik", "cenaze", "dogum"] as IzinKod[]).map((kod) => {
+                      const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
+                      return (
+                        <span
+                          key={kod}
+                          className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${izinRenk[kod]}`}
+                          title={`${turAd} (${izinKisaltma[kod]})`}
+                        >
+                          <span className="rounded bg-white/20 px-1">{izinKisaltma[kod]}</span>
+                          {turAd}
+                        </span>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <label className="text-[11px] font-semibold text-slate-600">Yil</label>
@@ -2102,7 +2145,10 @@ export default function Home() {
                                               : `${isoToDdMmYyyy(iso)} — Tikla`
                                       }
                                     >
-                                      <span className={buAy ? "font-medium" : ""}>{gunTarih.getDate()}</span>
+                                      <span className={["inline-flex items-center gap-0.5", buAy ? "font-medium" : ""].join(" ")}>
+                                        <span>{gunTarih.getDate()}</span>
+                                        {buAy && yarim && <span className="text-[8px] font-normal opacity-80">(1/2)</span>}
+                                      </span>
                                     </button>
                                   </td>
                                 );
@@ -2126,6 +2172,31 @@ export default function Home() {
               >
                 Kaydi Ekle
               </button>
+              {seciliIzinPersonel && mazeretYillikOzet && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="font-semibold text-slate-700">
+                    {seciliIzinPersonel.ad} - {mazeretTakvimYil}:
+                  </span>
+                  {mazeretYillikOzet.kirilim.length === 0 ? (
+                    <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-slate-600">
+                      Kayit yok
+                    </span>
+                  ) : (
+                    mazeretYillikOzet.kirilim.map(({ kod, gun }) => (
+                      <span
+                        key={kod}
+                        className={`rounded-full px-2 py-0.5 font-semibold ${izinRenk[kod]}`}
+                        title={`${izinTurleri.find((t) => t.kod === kod)?.ad ?? kod}: ${formatGunDegeri(gun)} gun`}
+                      >
+                        {izinKisaltma[kod]} {formatGunDegeri(gun)}
+                      </span>
+                    ))
+                  )}
+                  <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 font-semibold text-slate-700">
+                    Toplam {formatGunDegeri(mazeretYillikOzet.toplamGun)} gun
+                  </span>
+                </div>
+              )}
               {mazeretFormMesaj ? (
                 <p
                   role="status"
