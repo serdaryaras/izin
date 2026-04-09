@@ -614,11 +614,8 @@ export default function Home() {
   });
   /** Yillik mazeret takviminde gosterilen yil */
   const [mazeretTakvimYil, setMazeretTakvimYil] = useState<number>(() => bugun.getFullYear());
-  /**
-   * Aralik secimi: ilk tikta yer lestirilir; ikinci tikta aralik tamamlanir.
-   * null = yeni secime hazir.
-   */
-  const [mazeretTakvimBirinciGun, setMazeretTakvimBirinciGun] = useState<string | null>(null);
+  /** Takvimde tiklanan gunler (tek tek secim, tekrar tik = kaldir). */
+  const [mazeretTakvimSeciliGunler, setMazeretTakvimSeciliGunler] = useState<string[]>([]);
   const [mazeretPersonelArama, setMazeretPersonelArama] = useState("");
   const [mazeretPersonelListeAcik, setMazeretPersonelListeAcik] = useState(false);
   const mazeretPersonelKutuRef = useRef<HTMLDivElement>(null);
@@ -887,12 +884,10 @@ export default function Home() {
     });
   }
 
-  const izinFormSecimAraligi = useMemo(() => {
-    const a = ddMmYyyyToIso(izinForm.baslangic);
-    const b = ddMmYyyyToIso(izinForm.bitis);
-    if (!a || !b || a > b) return null;
-    return { bas: a, bit: b };
-  }, [izinForm.baslangic, izinForm.bitis]);
+  const mazeretTakvimSeciliGunSet = useMemo(
+    () => new Set(mazeretTakvimSeciliGunler),
+    [mazeretTakvimSeciliGunler],
+  );
 
   const mazeretTakvimYilSecenekleri = useMemo(() => {
     const c = bugun.getFullYear();
@@ -902,21 +897,21 @@ export default function Home() {
   }, [mazeretTakvimYil]);
 
   function mazeretTakvimGunTik(iso: string) {
-    if (!mazeretTakvimBirinciGun) {
-      setMazeretTakvimBirinciGun(iso);
-      const tr = isoToDdMmYyyy(iso);
-      setIzinForm((prev) => ({ ...prev, baslangic: tr, bitis: tr }));
-      return;
-    }
-    const u = mazeretTakvimBirinciGun;
-    setMazeretTakvimBirinciGun(null);
-    const a = u < iso ? u : iso;
-    const b = u < iso ? iso : u;
-    setIzinForm((prev) => ({
-      ...prev,
-      baslangic: isoToDdMmYyyy(a),
-      bitis: isoToDdMmYyyy(b),
-    }));
+    setMazeretTakvimSeciliGunler((prev) => {
+      const has = prev.includes(iso);
+      const next = has ? prev.filter((d) => d !== iso) : [...prev, iso];
+      next.sort();
+      if (next.length === 0) {
+        setIzinForm((f) => ({ ...f, baslangic: "", bitis: "" }));
+      } else {
+        setIzinForm((f) => ({
+          ...f,
+          baslangic: isoToDdMmYyyy(next[0]),
+          bitis: isoToDdMmYyyy(next[next.length - 1]),
+        }));
+      }
+      return next;
+    });
   }
 
   function mazeretTakvimMevcutIzin(dayIso: string): Izin | undefined {
@@ -1086,68 +1081,102 @@ export default function Home() {
     setSaving(true);
     setMazeretFormMesaj(null);
 
-    const basIso = ddMmYyyyToIso(izinForm.baslangic);
-    const bitIso = ddMmYyyyToIso(izinForm.bitis);
-    if (!basIso || !bitIso) {
-      setMazeretFormMesaj({
-        text: "Baslangic ve bitis gg.aa.yyyy olarak girilmeli.",
-        tip: "err",
-      });
-      setSaving(false);
-      return;
-    }
-    if (basIso > bitIso) {
-      setMazeretFormMesaj({
-        text: "Baslangic tarihi bitisten sonra olamaz.",
-        tip: "err",
-      });
-      setSaving(false);
-      return;
-    }
-
     const selectedPersonel = personeller.find((p) => p.id === izinForm.personel_id);
     if (!selectedPersonel) {
       setMazeretFormMesaj({ text: "Personel bulunamadi.", tip: "err" });
       setSaving(false);
       return;
     }
-    const cakisanlar = findOverlappingIzinler(izinler, izinForm.personel_id, basIso, bitIso);
-    if (cakisanlar.length > 0) {
-      const detay = izinCakismaListesiMetni(cakisanlar, izinTurleri);
-      setMazeretFormMesaj({
-        text: `Ayni gun icin ikinci kayit kabul edilmedi. Cakisan kayitlar: ${detay}`,
-        tip: "err",
-      });
-      setSaving(false);
-      return;
-    }
-
     const kod = izinForm.izin_tipi;
-    const gun = yearlyLeaveCharge(basIso, bitIso, tatilMap);
     const yasalLimit = yasalIzinLimitiniBul(kod, izinTurleri);
-    if (yasalLimit != null && gun > yasalLimit) {
-      const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
-      setMazeretFormMesaj({
-        text: `${turAd} icin yasal sure asildi (${gun} gun > ${yasalLimit} gun). Kayit eklenmedi.`,
-        tip: "warn",
+    type IzinInsert = Database["public"]["Tables"]["izinler"]["Insert"];
+    const seciliGunler = [...new Set(mazeretTakvimSeciliGunler)].sort();
+    let payloads: IzinInsert[] = [];
+    if (seciliGunler.length > 0) {
+      const cakisanGunler = seciliGunler.filter(
+        (gunIso) => findOverlappingIzinler(izinler, izinForm.personel_id, gunIso, gunIso).length > 0,
+      );
+      if (cakisanGunler.length > 0) {
+        setMazeretFormMesaj({
+          text: `Secilen gunlerden bazilarinda kayit var: ${cakisanGunler.map(isoToDdMmYyyy).join(", ")}`,
+          tip: "err",
+        });
+        setSaving(false);
+        return;
+      }
+      const toplamGun = seciliGunler.reduce((sum, d) => sum + yearlyLeaveCharge(d, d, tatilMap), 0);
+      if (yasalLimit != null && toplamGun > yasalLimit) {
+        const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
+        setMazeretFormMesaj({
+          text: `${turAd} icin yasal sure asildi (${toplamGun} gun > ${yasalLimit} gun). Kayit eklenmedi.`,
+          tip: "warn",
+        });
+        setSaving(false);
+        return;
+      }
+      payloads = seciliGunler.map((d) => {
+        const gun = yearlyLeaveCharge(d, d, tatilMap);
+        return {
+          personel_id: izinForm.personel_id,
+          izin_tipi: kod,
+          baslangic: d,
+          bitis: d,
+          gun_sayisi: gun,
+          gun,
+          aciklama: izinForm.aciklama || null,
+        };
       });
-      setSaving(false);
-      return;
+    } else {
+      const basIso = ddMmYyyyToIso(izinForm.baslangic);
+      const bitIso = ddMmYyyyToIso(izinForm.bitis);
+      if (!basIso || !bitIso) {
+        setMazeretFormMesaj({
+          text: "Baslangic ve bitis gg.aa.yyyy olarak girilmeli.",
+          tip: "err",
+        });
+        setSaving(false);
+        return;
+      }
+      if (basIso > bitIso) {
+        setMazeretFormMesaj({
+          text: "Baslangic tarihi bitisten sonra olamaz.",
+          tip: "err",
+        });
+        setSaving(false);
+        return;
+      }
+      const cakisanlar = findOverlappingIzinler(izinler, izinForm.personel_id, basIso, bitIso);
+      if (cakisanlar.length > 0) {
+        const detay = izinCakismaListesiMetni(cakisanlar, izinTurleri);
+        setMazeretFormMesaj({
+          text: `Ayni gun icin ikinci kayit kabul edilmedi. Cakisan kayitlar: ${detay}`,
+          tip: "err",
+        });
+        setSaving(false);
+        return;
+      }
+      const gun = yearlyLeaveCharge(basIso, bitIso, tatilMap);
+      if (yasalLimit != null && gun > yasalLimit) {
+        const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
+        setMazeretFormMesaj({
+          text: `${turAd} icin yasal sure asildi (${gun} gun > ${yasalLimit} gun). Kayit eklenmedi.`,
+          tip: "warn",
+        });
+        setSaving(false);
+        return;
+      }
+      payloads = [{
+        personel_id: izinForm.personel_id,
+        izin_tipi: kod,
+        baslangic: basIso,
+        bitis: bitIso,
+        gun_sayisi: gun,
+        gun,
+        aciklama: izinForm.aciklama || null,
+      }];
     }
 
-    type IzinInsert = Database["public"]["Tables"]["izinler"]["Insert"];
-
-    const payload: IzinInsert = {
-      personel_id: izinForm.personel_id,
-      izin_tipi: kod,
-      baslangic: basIso,
-      bitis: bitIso,
-      gun_sayisi: gun,
-      gun,
-      aciklama: izinForm.aciklama || null,
-    };
-
-    const { error: insError } = await sb.from("izinler").insert(payload);
+    const { error: insError } = await sb.from("izinler").insert(payloads);
     if (insError) setMazeretFormMesaj({ text: insError.message, tip: "err" });
     else {
       setMazeretFormMesaj({ text: "Kayit eklendi.", tip: "ok" });
@@ -1163,6 +1192,7 @@ export default function Home() {
       setMazeretPersonelListeAcik(false);
       setMazeretTurArama("");
       setMazeretTurListeAcik(false);
+      setMazeretTakvimSeciliGunler([]);
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
@@ -1938,8 +1968,8 @@ export default function Home() {
                 <div>
                   <h3 className="text-xs font-semibold text-slate-800">Yillik takvimden tarih secimi</h3>
                   <p className="text-[11px] leading-relaxed text-slate-600">
-                    Ilk tik: tek gun (baslangic = bitis). ikinci tik: aralik. Ucuncu tik yeni araliga baslar.
-                    Secilen tur rengi yeni giris araliginda kullanilir. Personel seciliyse mevcut kayitlar kisaltma ile
+                    Gunler tek tek secilir. Tekrar tiklanan gun secimden cikar.
+                    Secilen tur rengi tiklanan gunlerde kullanilir. Personel seciliyse mevcut kayitlar kisaltma ile
                     gosterilir.
                   </p>
                 </div>
@@ -1950,7 +1980,8 @@ export default function Home() {
                     value={mazeretTakvimYil}
                     onChange={(e) => {
                       setMazeretTakvimYil(Number(e.target.value));
-                      setMazeretTakvimBirinciGun(null);
+                      setMazeretTakvimSeciliGunler([]);
+                      setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
                     }}
                   >
                     {mazeretTakvimYilSecenekleri.map((y) => (
@@ -1963,7 +1994,7 @@ export default function Home() {
                     type="button"
                     className="rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
                     onClick={() => {
-                      setMazeretTakvimBirinciGun(null);
+                      setMazeretTakvimSeciliGunler([]);
                       setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
                     }}
                   >
@@ -2020,10 +2051,7 @@ export default function Home() {
                                 const tur = tatilMap.get(iso);
                                 const resmi = tur === "resmi_tatil";
                                 const yarim = isHalfDay(iso, tur);
-                                const secimde =
-                                  izinFormSecimAraligi != null &&
-                                  iso >= izinFormSecimAraligi.bas &&
-                                  iso <= izinFormSecimAraligi.bit;
+                                const secimde = mazeretTakvimSeciliGunSet.has(iso);
                                 const mevcut = mazeretTakvimMevcutIzin(iso);
                                 const takvimGunuGecerli =
                                   !isSunday(gunTarih) && tur !== "resmi_tatil";
@@ -2034,7 +2062,6 @@ export default function Home() {
                                   : "";
                                 const seciliTurAdi =
                                   izinTurleri.find((t) => t.kod === secTip)?.ad ?? secTip;
-                                const ciroNokta = mazeretTakvimBirinciGun === iso;
 
                                 let zemini: string;
                                 if (secimGoster) {
@@ -2064,7 +2091,6 @@ export default function Home() {
                                         "flex h-5 w-full min-w-0 items-center justify-center rounded-sm leading-none",
                                         zemini,
                                         buAy ? "cursor-pointer hover:brightness-95" : "cursor-default opacity-60",
-                                        ciroNokta ? "ring-2 ring-amber-500 ring-offset-1" : "",
                                       ].join(" ")}
                                       title={
                                         !buAy
