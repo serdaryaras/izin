@@ -539,7 +539,13 @@ export default function PdksPage() {
                 break;
               }
             }
-            if (headerIdx === -1) return;
+            // Baslik yoksa A-B-C kolonlarini (Tarih-Baslangic-Bitis) dogrudan veri kabul et.
+            if (headerIdx === -1) {
+              tarihIdx = 0;
+              baslangicIdx = 1;
+              bitisIdx = 2;
+              headerIdx = -1;
+            }
             for (let i = headerIdx + 1; i < rows.length; i++) {
               const row = rows[i];
               const tarih = excelDateToJS(XLSX, row[tarihIdx]);
