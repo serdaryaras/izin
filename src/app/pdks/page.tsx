@@ -220,9 +220,11 @@ function splitCsv(text: string, delimiter = ","): string[][] {
 
 export default function PdksPage() {
   const [pdksFile, setPdksFile] = useState<File | null>(null);
+  const [idariIzinFile, setIdariIzinFile] = useState<File | null>(null);
   const [pairCount, setPairCount] = useState(0);
   const [personCount, setPersonCount] = useState(0);
   const [mazeretCount, setMazeretCount] = useState(0);
+  const [idariIzinCount, setIdariIzinCount] = useState(0);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [cleanRecords, setCleanRecords] = useState<PairRecord[]>([]);
@@ -503,6 +505,61 @@ export default function PdksPage() {
         holidayMapObj[k] = v;
       });
 
+      // Idari izin map: day -> toplam dakika (tum personele uygulanir)
+      const idariIzinByDay = new Map<string, number>();
+      let nextIdariIzinCount = 0;
+      if (idariIzinFile) {
+        try {
+          const XLSX = await import("xlsx");
+          const buf = await idariIzinFile.arrayBuffer();
+          const wb = XLSX.read(buf, { type: "array", cellDates: true });
+          const timeFromValue = (value: unknown): { h: number; m: number } | null => {
+            const parsed = excelDateToJS(XLSX, value);
+            if (!parsed) return null;
+            if (parsed instanceof Date) return { h: parsed.getHours(), m: parsed.getMinutes() };
+            if (typeof parsed === "object" && "timeOnly" in parsed) return { h: parsed.h, m: parsed.m };
+            return null;
+          };
+          wb.SheetNames.forEach((name) => {
+            const ws = wb.Sheets[name];
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" }) as any[][];
+            let headerIdx = -1;
+            let tarihIdx = -1;
+            let baslangicIdx = -1;
+            let bitisIdx = -1;
+            for (let i = 0; i < Math.min(rows.length, 20); i++) {
+              rows[i].forEach((v, idx) => {
+                const t = normalizeText(v);
+                if (t.includes("tarih")) tarihIdx = idx;
+                else if (t.includes("baslangic")) baslangicIdx = idx;
+                else if (t.includes("bitis")) bitisIdx = idx;
+              });
+              if (tarihIdx >= 0 && baslangicIdx >= 0 && bitisIdx >= 0) {
+                headerIdx = i;
+                break;
+              }
+            }
+            if (headerIdx === -1) return;
+            for (let i = headerIdx + 1; i < rows.length; i++) {
+              const row = rows[i];
+              const tarih = excelDateToJS(XLSX, row[tarihIdx]);
+              if (!(tarih instanceof Date)) continue;
+              const bas = timeFromValue(row[baslangicIdx]);
+              const bit = timeFromValue(row[bitisIdx]);
+              if (!bas || !bit) continue;
+              const startMin = bas.h * 60 + bas.m;
+              const endMin = bit.h * 60 + bit.m;
+              if (endMin <= startMin) continue;
+              const dayKey = fmtDateKey(tarih);
+              idariIzinByDay.set(dayKey, (idariIzinByDay.get(dayKey) ?? 0) + (endMin - startMin));
+              nextIdariIzinCount += 1;
+            }
+          });
+        } catch {
+          // Idari izin okunamazsa hesaplamaya idari izin dusumu olmadan devam.
+        }
+      }
+
       // Daily/weekly calculations
       const byP = new Map<string, PairRecord[]>();
       pairs.forEach((p) => {
@@ -577,6 +634,11 @@ export default function PdksPage() {
               gunDurumu = mazeretMap.get(`${normalizeText(personel)}__${dayKey}`) || gunDurumu;
             }
           }
+          const idariIzinMin = idariIzinByDay.get(dayKey) ?? 0;
+          if (expected > 0 && idariIzinMin > 0) {
+            expected = Math.max(0, expected - idariIzinMin);
+            if (!gunDurumu) gunDurumu = "idari izin";
+          }
 
           const ws = new Date(date);
           const day = ws.getDay();
@@ -626,6 +688,7 @@ export default function PdksPage() {
       setUnmatchedRows(unmatched);
       setPairCount(pairs.length);
       setMazeretCount(nextMazeretCount);
+      setIdariIzinCount(nextIdariIzinCount);
       setLeaveDayStatusMap(leaveMapObj);
       setHolidayDayTypeMap(holidayMapObj);
       setDailyRows(dRows);
@@ -765,7 +828,7 @@ export default function PdksPage() {
   useEffect(() => {
     if (!pdksFile) return;
     void processAll();
-  }, [pdksFile, recalcVersion]);
+  }, [pdksFile, idariIzinFile, recalcVersion]);
 
   const faultyDays = useMemo(() => {
     const map = new Map<string, { personel: string; tarih: string; reasons: Set<string>; count: number }>();
@@ -853,7 +916,7 @@ export default function PdksPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-bold tracking-tight">PDKS - Puantaj Raporu</h1>
           <p className="mt-2 text-sm text-slate-500">Bu ekranda sadece hatali gunleri tespit edip, secili gun kayitlarini duzeltebilirsiniz.</p>
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <div className="mt-4 grid gap-4 md:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ham PDKS Dosyasi</p>
               <input className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" type="file" accept=".csv,.xls,.xlsx" onChange={(e) => {
@@ -864,12 +927,21 @@ export default function PdksPage() {
               }} />
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Idari Izin Dosyasi</p>
+              <input
+                className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"
+                type="file"
+                accept=".xls,.xlsx"
+                onChange={(e) => setIdariIzinFile(e.target.files?.[0] ?? null)}
+              />
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Eslesmeyen Kayit</p>
               <div className="mt-2 text-3xl font-bold tracking-tight">{unmatchedRows.length}</div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Personel / Mazeret</p>
-              <div className="mt-2 text-xl font-bold tracking-tight">{personCount} / {mazeretCount}</div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Personel / Mazeret / Idari</p>
+              <div className="mt-2 text-xl font-bold tracking-tight">{personCount} / {mazeretCount} / {idariIzinCount}</div>
             </div>
           </div>
           <div className="mt-4 flex gap-2">
