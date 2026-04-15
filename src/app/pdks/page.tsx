@@ -1274,6 +1274,7 @@ export default function PdksPage() {
                         const noWorkOnNonWorkingDay = nonWorkingDay && brutMin <= 0;
                         const bakiyeText = row && !noWorkOnNonWorkingDay ? row.bakiye : "";
                         const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
+                        const displayLeaveCode = leaveCode === "Y" && holidayType === "half" ? "Y(1/2)" : leaveCode;
                         const beklenenMin = row ? hhmmToMinutes(row.beklenen) : 0;
                         const hareketYokCalismaGunu = !!row && beklenenMin > 0 && brutMin <= 0 && !leaveCode;
                         const calismaDisiVeKayitYok = calismaDisi && !row;
@@ -1300,7 +1301,7 @@ export default function PdksPage() {
                           >
                             {leaveCode ? (
                               <span className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm text-[10px] font-bold leading-none tracking-tight ${getTakvimGunGolgeClass(cellDurum)}`}>
-                                {leaveCode}
+                                {displayLeaveCode}
                               </span>
                             ) : (
                               <span className={`inline-block w-full text-center text-[10px] font-semibold ${
