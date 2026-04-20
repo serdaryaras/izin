@@ -1057,13 +1057,18 @@ export default function PdksPage() {
     if (izinTipiSecenekleri.some((t) => t.kod === kartIzinTipi)) return;
     setKartIzinTipi(izinTipiSecenekleri[0]?.kod ?? "yillik");
   }, [izinTipiSecenekleri, kartIzinTipi]);
-  function getMazeretAdayTip(row: DailyRow | undefined, leaveCode: string): "full" | "half" | null {
+  function getMazeretAdayTip(row: DailyRow | undefined, leaveCode: string, iso: string): "full" | "half" | null {
     if (!row || leaveCode) return null;
+    const day = new Date(`${iso}T00:00:00`);
+    const cumartesi = isSaturday(day);
     const beklenenMin = hhmmToMinutes(row.beklenen);
-    if (beklenenMin <= 0) return null;
     const brutMin = hhmmToMinutes(row.brut);
+    // Cumartesi icin de karttan mazeret/izin kaydi acilsin.
+    if (!cumartesi && beklenenMin <= 0) return null;
     if (brutMin <= 0) return "full";
-    if (brutMin <= HALF_DAY_TARGET_MIN) return "half";
+    const netMin = hhmmToMinutes(row.net);
+    if (netMin > 0 && netMin <= HALF_DAY_TARGET_MIN) return "half";
+    if (brutMin > 0 && brutMin <= HALF_DAY_TARGET_MIN) return "half";
     return null;
   }
   function toggleMazeretCell(personel: string, iso: string, tip: "full" | "half" | null) {
@@ -1349,7 +1354,7 @@ export default function PdksPage() {
             </button>
           </div>
           <p className="mt-2 text-[11px] text-slate-500">
-            Yalnizca hic gelinmeyen veya brut 04:30 ve alti calisilan uygun hucreler secilebilir. Uygun hucreye tiklayarak secimi acip kapatabilirsiniz.
+            Mavi ince cerceveli hucreler secilebilir. Kural: hic gelinmeyen veya net/brut calisma suresi 04:30 ve alti olan gunler (Cumartesi dahil).
           </p>
           <div className="mt-3 overflow-hidden rounded-xl ring-[0.5px] ring-slate-400">
             <div className="overflow-auto" data-aylik-bakiye-table-wrap>
@@ -1412,9 +1417,10 @@ export default function PdksPage() {
                         const bakiyeText = row && !noWorkOnNonWorkingDay ? row.bakiye : "";
                         const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
                         const displayLeaveCode = getLeaveBadgeLabel(leaveCode, cellDurum, holidayType);
-                        const mazeretAdayTip = getMazeretAdayTip(row, leaveCode);
+                        const mazeretAdayTip = getMazeretAdayTip(row, leaveCode, iso);
                         const secimKey = `${normalizeText(p)}__${iso}`;
                         const seciliMazeretHucre = !!selectedMazeretCells[secimKey];
+                        const secilebilirHucre = !!mazeretAdayTip;
                         const beklenenMin = row ? hhmmToMinutes(row.beklenen) : 0;
                         const hareketYokCalismaGunu = !!row && beklenenMin > 0 && brutMin <= 0 && !leaveCode;
                         const calismaDisiVeKayitYok = calismaDisi && !row;
@@ -1436,8 +1442,8 @@ export default function PdksPage() {
                                 : hareketYokCalismaGunu
                                   ? "bg-red-300"
                                   : cellBg
-                            } ${seciliMazeretHucre ? "ring-2 ring-inset ring-sky-500" : ""} ${mazeretAdayTip ? "cursor-pointer" : ""}`}
-                            title={hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : (cellDurum || "")}
+                            } ${seciliMazeretHucre ? "ring-2 ring-inset ring-sky-500" : ""} ${secilebilirHucre ? "cursor-pointer ring-1 ring-inset ring-sky-200" : ""}`}
+                            title={secilebilirHucre ? "Mazeret eklemek icin tiklayin" : (hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : (cellDurum || ""))}
                             onClick={() => toggleMazeretCell(p, iso, mazeretAdayTip)}
                             onMouseDown={(e) => {
                               if (!mazeretAdayTip) return;

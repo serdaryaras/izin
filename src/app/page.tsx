@@ -347,7 +347,7 @@ function cumulativeAnnualUsedThroughDate(
     if (i.bitis < iseGiris || i.baslangic > endIso) continue;
     const from = i.baslangic > iseGiris ? i.baslangic : iseGiris;
     const to = i.bitis < endIso ? i.bitis : endIso;
-    if (from <= to) sum += yearlyLeaveCharge(from, to, tatilMap);
+    if (from <= to) sum += izinChargeInRange(i, from, to, tatilMap);
   }
   sum += Number(personel.devir_onceki_kullanilan_izin ?? 0);
   return sum;
@@ -410,6 +410,22 @@ function yearlyLeaveCharge(
   return toplam;
 }
 
+function izinChargeInRange(
+  izin: Izin,
+  fromIso: string,
+  toIso: string,
+  tatilMap: Map<string, string>,
+): number {
+  if (fromIso > toIso) return 0;
+  // Tek gunluk kayitlarda explicit gun bilgisi varsa (or. 0.5), bunu esas al.
+  if (izin.baslangic === izin.bitis && fromIso === toIso && fromIso === izin.baslangic) {
+    const stored = izin.gun ?? izin.gun_sayisi;
+    if (typeof stored === "number" && Number.isFinite(stored) && stored >= 0) return stored;
+  }
+  // Diger tum durumlarda (arefe/pazar/resmi tatil dahil) takvim kuralindan hesapla.
+  return yearlyLeaveCharge(fromIso, toIso, tatilMap);
+}
+
 function shouldShowOnDay(
   izin: Izin,
   dayIso: string,
@@ -433,7 +449,7 @@ function annualLeaveUsedInIsoRange(
     if (i.bitis < rangeBas || i.baslangic > rangeSon) continue;
     const from = i.baslangic > rangeBas ? i.baslangic : rangeBas;
     const to = i.bitis < rangeSon ? i.bitis : rangeSon;
-    if (from <= to) sum += yearlyLeaveCharge(from, to, tatilMap);
+    if (from <= to) sum += izinChargeInRange(i, from, to, tatilMap);
   }
   return sum;
 }
@@ -962,7 +978,7 @@ export default function Home() {
         const from = iz.baslangic > ayBas ? iz.baslangic : ayBas;
         const to = iz.bitis < aySon ? iz.bitis : aySon;
         if (from > to) continue;
-        const gun = yearlyLeaveCharge(from, to, tatilMap);
+        const gun = izinChargeInRange(iz, from, to, tatilMap);
         toplamlar.set(iz.izin_tipi, (toplamlar.get(iz.izin_tipi) ?? 0) + gun);
       }
 
@@ -994,7 +1010,7 @@ export default function Home() {
       const from = iz.baslangic > yilBas ? iz.baslangic : yilBas;
       const to = iz.bitis < yilSon ? iz.bitis : yilSon;
       if (from > to) continue;
-      const gun = yearlyLeaveCharge(from, to, tatilMap);
+      const gun = izinChargeInRange(iz, from, to, tatilMap);
       turBazli.set(iz.izin_tipi, (turBazli.get(iz.izin_tipi) ?? 0) + gun);
     }
 
@@ -1511,7 +1527,7 @@ export default function Home() {
             if (k.bitis < d.donemBasIso || k.baslangic > d.donemSonIso) continue;
             const from = k.baslangic > d.donemBasIso ? k.baslangic : d.donemBasIso;
             const to = k.bitis < d.donemSonIso ? k.bitis : d.donemSonIso;
-            const gun = from <= to ? yearlyLeaveCharge(from, to, tatilMap) : 0;
+            const gun = from <= to ? izinChargeInRange(k, from, to, tatilMap) : 0;
             if (gun <= 0) continue;
             entries.push({
               id: `${k.id}-k${d.kidemYili}-${from}-${to}`,
