@@ -1063,8 +1063,7 @@ export default function PdksPage() {
     if (beklenenMin <= 0) return null;
     const brutMin = hhmmToMinutes(row.brut);
     if (brutMin <= 0) return "full";
-    const netMin = hhmmToMinutes(row.net);
-    if (netMin > 0 && netMin <= HALF_DAY_TARGET_MIN) return "half";
+    if (brutMin <= HALF_DAY_TARGET_MIN) return "half";
     return null;
   }
   function toggleMazeretCell(personel: string, iso: string, tip: "full" | "half" | null) {
@@ -1350,7 +1349,7 @@ export default function PdksPage() {
             </button>
           </div>
           <p className="mt-2 text-[11px] text-slate-500">
-            Yalnizca hic gelinmeyen veya net 04:30 ve alti calisilan uygun hucreler secilebilir. Uygun hucreye tiklayarak secimi acip kapatabilirsiniz.
+            Yalnizca hic gelinmeyen veya brut 04:30 ve alti calisilan uygun hucreler secilebilir. Uygun hucreye tiklayarak secimi acip kapatabilirsiniz.
           </p>
           <div className="mt-3 overflow-hidden rounded-xl ring-[0.5px] ring-slate-400">
             <div className="overflow-auto" data-aylik-bakiye-table-wrap>
@@ -1440,6 +1439,10 @@ export default function PdksPage() {
                             } ${seciliMazeretHucre ? "ring-2 ring-inset ring-sky-500" : ""} ${mazeretAdayTip ? "cursor-pointer" : ""}`}
                             title={hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : (cellDurum || "")}
                             onClick={() => toggleMazeretCell(p, iso, mazeretAdayTip)}
+                            onMouseDown={(e) => {
+                              if (!mazeretAdayTip) return;
+                              e.preventDefault();
+                            }}
                           >
                             {leaveCode ? (
                               <span className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm text-[10px] font-bold leading-none tracking-tight ${getTakvimGunGolgeClass(cellDurum)}`}>
