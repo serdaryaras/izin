@@ -426,6 +426,33 @@ function izinChargeInRange(
   return yearlyLeaveCharge(fromIso, toIso, tatilMap);
 }
 
+/** Izin kaydinin belirtilen takvim gunune dusen gunluk yuku (izinChargeInRange ile tutarli). */
+function izinGunlukYuk(
+  izin: Izin,
+  dayIso: string,
+  tatilMap: Map<string, string>,
+): number {
+  if (dayIso < izin.baslangic || dayIso > izin.bitis) return 0;
+  if (izin.baslangic === izin.bitis && dayIso === izin.baslangic) {
+    const stored = izin.gun ?? izin.gun_sayisi;
+    if (typeof stored === "number" && Number.isFinite(stored) && stored >= 0) return stored;
+  }
+  const d = parseISODate(dayIso);
+  const tur = tatilMap.get(dayIso);
+  if (isSunday(d) || tur === "resmi_tatil") return 0;
+  if (isHalfDay(dayIso, tur)) return 0.5;
+  return 1;
+}
+
+/** Aylik takvim hucresi: yillik yarim gun Y1/2, diger turlerde yarim gun ise kisaltma + ½. */
+function aylikTakvimRozetMetni(izin: Izin, dayIso: string, tatilMap: Map<string, string>): string {
+  const yuk = izinGunlukYuk(izin, dayIso, tatilMap);
+  const yarimGun = yuk > 0 && yuk < 1;
+  if (yarimGun && izin.izin_tipi === "yillik") return "Y1/2";
+  if (yarimGun) return `${izinKisaltma[izin.izin_tipi]}½`;
+  return izinKisaltma[izin.izin_tipi];
+}
+
 function shouldShowOnDay(
   izin: Izin,
   dayIso: string,
@@ -2441,6 +2468,12 @@ export default function Home() {
                   {t.ad}
                 </span>
               ))}
+              <span className="inline-flex max-w-[11rem] min-w-0 items-center justify-center gap-1 rounded-full bg-sky-50 px-2.5 py-1.5 text-center text-[11px] font-medium leading-snug text-slate-800">
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${izinRenk.yillik}`}>
+                  Y1/2
+                </span>
+                Yillik izin (yarim gun)
+              </span>
               <span className="inline-flex max-w-[11rem] items-center justify-center rounded-full bg-rose-100 px-2.5 py-1.5 text-center text-[11px] font-medium leading-snug text-slate-800">
                 Pazar
               </span>
@@ -2517,11 +2550,13 @@ export default function Home() {
                       const gizleIzin =
                         !!izin &&
                         !shouldShowOnDay(izin, d, tur);
-                      const yarimGun = isHalfDay(d, tur);
+                      const tatilYarimGun = isHalfDay(d, tur);
+                      const rozetMetni =
+                        izin && !gizleIzin ? aylikTakvimRozetMetni(izin, d, tatilMap) : "";
                       const cellBg =
                         tur === "resmi_tatil"
                           ? "bg-slate-200"
-                          : yarimGun
+                          : tatilYarimGun
                             ? "bg-amber-100"
                             : isPazar
                               ? "bg-rose-100"
@@ -2533,10 +2568,12 @@ export default function Home() {
                         >
                           {izin && !gizleIzin ? (
                             <span
-                              className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm text-[10px] font-bold leading-none tracking-tight ${izinRenk[izin.izin_tipi]}`}
+                              className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm font-bold leading-none tracking-tight ${izinRenk[izin.izin_tipi]} ${
+                                rozetMetni === "Y1/2" ? "px-0.5 text-[8px]" : "text-[10px]"
+                              }`}
                               title={`${izin.izin_tipi} (${isoToDdMmYyyy(izin.baslangic)} - ${isoToDdMmYyyy(izin.bitis)})`}
                             >
-                              {yarimGun ? `${izinKisaltma[izin.izin_tipi]}½` : izinKisaltma[izin.izin_tipi]}
+                              {rozetMetni}
                             </span>
                           ) : null}
                         </td>
