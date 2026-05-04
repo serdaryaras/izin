@@ -55,6 +55,8 @@ type PersonelForm = {
   cinsiyet: Cinsiyet;
 };
 
+type MazeretGunModu = "tam" | "yarim";
+
 type IzinForm = {
   personel_id: string;
   /** Arama kutusuyla uyum: yazilan metin secili tur adiyla eslesmeyince bos */
@@ -62,6 +64,8 @@ type IzinForm = {
   baslangic: string;
   bitis: string;
   aciklama: string;
+  /** Metinle tek gunluk baslangic=bitis girisinde tam / yarim (takvim secimi yokken). */
+  tekGunModu: MazeretGunModu;
 };
 
 const izinKisaltma: Record<IzinKod, string> = {
@@ -410,6 +414,21 @@ function yearlyLeaveCharge(
   return toplam;
 }
 
+/**
+ * Mazeret girisi: kullanici yarim derse 0,5 gun; tam derse Arefe/28 Ekim gibi yari gun
+ * sayilan takvim gunlerinde 1 gun, diger calisma gunlerinde yearlyLeaveCharge.
+ */
+function mazeretGunlukKayitDegeri(
+  iso: string,
+  mod: MazeretGunModu,
+  tatilMap: Map<string, string>,
+): number {
+  if (mod === "yarim") return 0.5;
+  const tur = tatilMap.get(iso);
+  if (isHalfDay(iso, tur)) return 1;
+  return yearlyLeaveCharge(iso, iso, tatilMap);
+}
+
 function izinChargeInRange(
   izin: Izin,
   fromIso: string,
@@ -666,11 +685,14 @@ export default function Home() {
     baslangic: "",
     bitis: "",
     aciklama: "",
+    tekGunModu: "tam",
   });
   /** Yillik mazeret takviminde gosterilen yil */
   const [mazeretTakvimYil, setMazeretTakvimYil] = useState<number>(() => bugun.getFullYear());
   /** Takvimde tiklanan gunler (tek tek secim, tekrar tik = kaldir). */
   const [mazeretTakvimSeciliGunler, setMazeretTakvimSeciliGunler] = useState<string[]>([]);
+  /** Takvim seciminde gun bazinda tam / yarim (Arefe vb. ile bagimsiz). */
+  const [mazeretGunModlari, setMazeretGunModlari] = useState<Record<string, MazeretGunModu>>({});
   const [mazeretPersonelArama, setMazeretPersonelArama] = useState("");
   const [mazeretPersonelListeAcik, setMazeretPersonelListeAcik] = useState(false);
   const mazeretPersonelKutuRef = useRef<HTMLDivElement>(null);
@@ -915,6 +937,12 @@ export default function Home() {
     return new Map(tatiller.map((t) => [t.tarih, t.tur]));
   }, [tatiller]);
 
+  const mazeretTekGunMetinMi = useMemo(() => {
+    const basIso = ddMmYyyyToIso(izinForm.baslangic.trim());
+    const bitIso = ddMmYyyyToIso(izinForm.bitis.trim());
+    return !!(basIso && bitIso && basIso === bitIso);
+  }, [izinForm.baslangic, izinForm.bitis]);
+
   const daysInMonth = useMemo(() => {
     const first = startOfMonth(year, month);
     const last = endOfMonth(year, month);
@@ -956,6 +984,19 @@ export default function Home() {
       const has = prev.includes(iso);
       const next = has ? prev.filter((d) => d !== iso) : [...prev, iso];
       next.sort();
+      if (has) {
+        setMazeretGunModlari((mods) => {
+          if (!(iso in mods)) return mods;
+          const { [iso]: _, ...rest } = mods;
+          return rest;
+        });
+      } else {
+        const tur = tatilMap.get(iso);
+        setMazeretGunModlari((mods) => ({
+          ...mods,
+          [iso]: isHalfDay(iso, tur) ? "yarim" : "tam",
+        }));
+      }
       if (next.length === 0) {
         setIzinForm((f) => ({ ...f, baslangic: "", bitis: "" }));
       } else {
@@ -1183,7 +1224,11 @@ export default function Home() {
         setSaving(false);
         return;
       }
-      const toplamGun = seciliGunler.reduce((sum, d) => sum + yearlyLeaveCharge(d, d, tatilMap), 0);
+      const toplamGun = seciliGunler.reduce((sum, d) => {
+        const tur = tatilMap.get(d);
+        const mod = mazeretGunModlari[d] ?? (isHalfDay(d, tur) ? "yarim" : "tam");
+        return sum + mazeretGunlukKayitDegeri(d, mod, tatilMap);
+      }, 0);
       if (yasalLimit != null && toplamGun > yasalLimit) {
         const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
         setMazeretFormMesaj({
@@ -1194,7 +1239,9 @@ export default function Home() {
         return;
       }
       payloads = seciliGunler.map((d) => {
-        const gun = yearlyLeaveCharge(d, d, tatilMap);
+        const turH = tatilMap.get(d);
+        const mod = mazeretGunModlari[d] ?? (isHalfDay(d, turH) ? "yarim" : "tam");
+        const gun = mazeretGunlukKayitDegeri(d, mod, tatilMap);
         return {
           personel_id: izinForm.personel_id,
           izin_tipi: kod,
@@ -1234,7 +1281,10 @@ export default function Home() {
         setSaving(false);
         return;
       }
-      const gun = yearlyLeaveCharge(basIso, bitIso, tatilMap);
+      const gun =
+        basIso === bitIso
+          ? mazeretGunlukKayitDegeri(basIso, izinForm.tekGunModu, tatilMap)
+          : yearlyLeaveCharge(basIso, bitIso, tatilMap);
       if (yasalLimit != null && gun > yasalLimit) {
         const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
         setMazeretFormMesaj({
@@ -1266,12 +1316,14 @@ export default function Home() {
         baslangic: "",
         bitis: "",
         aciklama: "",
+        tekGunModu: "tam",
       });
       setMazeretPersonelArama("");
       setMazeretPersonelListeAcik(false);
       setMazeretTurArama("");
       setMazeretTurListeAcik(false);
       setMazeretTakvimSeciliGunler([]);
+      setMazeretGunModlari({});
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
@@ -2029,6 +2081,38 @@ export default function Home() {
               />
             </div>
 
+            {mazeretTakvimSeciliGunler.length === 0 && mazeretTekGunMetinMi ? (
+              <div className="min-w-0 sm:col-span-2 lg:col-span-3">
+                <span className={mazeretLabelClass}>Gun sayimi (tek gun — baslangic ve bitis ayni)</span>
+                <div className="flex flex-wrap gap-3 pt-0.5">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="mazeret-tek-gun-modu"
+                      className="text-blue-600"
+                      checked={izinForm.tekGunModu === "tam"}
+                      onChange={() =>
+                        setIzinForm((prev) => ({ ...prev, tekGunModu: "tam" }))
+                      }
+                    />
+                    Tam gun
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="mazeret-tek-gun-modu"
+                      className="text-blue-600"
+                      checked={izinForm.tekGunModu === "yarim"}
+                      onChange={() =>
+                        setIzinForm((prev) => ({ ...prev, tekGunModu: "yarim" }))
+                      }
+                    />
+                    Yarim gun
+                  </label>
+                </div>
+              </div>
+            ) : null}
+
             <div className="col-span-full mt-2 min-w-0 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner">
               <div className="mb-2 flex min-w-0 flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                 <div>
@@ -2036,7 +2120,9 @@ export default function Home() {
                   <p className="text-[11px] leading-relaxed text-slate-600">
                     Gunler tek tek secilir. Tekrar tiklanan gun secimden cikar.
                     Secilen tur rengi tiklanan gunlerde kullanilir. Personel seciliyse mevcut kayitlar kisaltma ile
-                    gosterilir.
+                    gosterilir. Arefe / 28 Ekim yeni eklemede varsayilan yari gundur; asagidaki listeden her gunu
+                    bagimsiz Tam veya Yarim yapabilirsiniz. Metinle yalnizca tek gun (baslangic = bitis) girerseniz
+                    Tam / Yarim ayni sekilde secilebilir; cok gunluk aralikta gunler tam sayilir.
                   </p>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     {(["yillik", "rapor", "dis", "evlilik", "cenaze", "dogum"] as IzinKod[]).map((kod) => {
@@ -2062,6 +2148,7 @@ export default function Home() {
                     onChange={(e) => {
                       setMazeretTakvimYil(Number(e.target.value));
                       setMazeretTakvimSeciliGunler([]);
+                      setMazeretGunModlari({});
                       setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
                     }}
                   >
@@ -2076,6 +2163,7 @@ export default function Home() {
                     className="rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
                     onClick={() => {
                       setMazeretTakvimSeciliGunler([]);
+                      setMazeretGunModlari({});
                       setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
                     }}
                   >
@@ -2143,6 +2231,11 @@ export default function Home() {
                                   : "";
                                 const seciliTurAdi =
                                   izinTurleri.find((t) => t.kod === secTip)?.ad ?? secTip;
+                                const secimMod =
+                                  secimGoster
+                                    ? mazeretGunModlari[iso] ??
+                                      (isHalfDay(iso, tur) ? "yarim" : "tam")
+                                    : null;
 
                                 let zemini: string;
                                 if (secimGoster) {
@@ -2177,7 +2270,9 @@ export default function Home() {
                                         !buAy
                                           ? ""
                                           : secimGoster
-                                            ? `${isoToDdMmYyyy(iso)} — Secim: ${seciliTurAdi}`
+                                            ? `${isoToDdMmYyyy(iso)} — Secim: ${seciliTurAdi} (${
+                                                secimMod === "yarim" ? "yarim gun" : "tam gun"
+                                              })`
                                             : mevcutGoster
                                               ? `${isoToDdMmYyyy(iso)} — Mazeret: ${mevcutTurAdi}`
                                               : `${isoToDdMmYyyy(iso)} — Tikla`
@@ -2185,7 +2280,15 @@ export default function Home() {
                                     >
                                       <span className={["inline-flex items-center gap-0.5", buAy ? "font-medium" : ""].join(" ")}>
                                         <span>{gunTarih.getDate()}</span>
-                                        {buAy && yarim && <span className="text-[8px] font-normal opacity-80">(1/2)</span>}
+                                        {buAy && secimGoster && secimMod === "yarim" && (
+                                          <span className="text-[7px] font-semibold opacity-90">½</span>
+                                        )}
+                                        {buAy && secimGoster && secimMod === "tam" && (
+                                          <span className="text-[7px] font-semibold opacity-90">1</span>
+                                        )}
+                                        {buAy && !secimGoster && yarim && (
+                                          <span className="text-[8px] font-normal opacity-80">(1/2)</span>
+                                        )}
                                       </span>
                                     </button>
                                   </td>
@@ -2199,6 +2302,59 @@ export default function Home() {
                   );
                 })}
               </div>
+
+              {mazeretTakvimSeciliGunler.length > 0 ? (
+                <div className="mt-3 rounded-md border border-slate-200 bg-slate-50/90 px-2 py-2">
+                  <p className="mb-2 text-[11px] font-semibold text-slate-700">
+                    Secilen gunler — tam / yarim gun (Arefe vb. otomatik yari varsayilan; degistirebilirsiniz)
+                  </p>
+                  <ul className="max-h-40 space-y-1.5 overflow-y-auto">
+                    {[...mazeretTakvimSeciliGunler].sort().map((iso) => {
+                      const turL = tatilMap.get(iso);
+                      const mod =
+                        mazeretGunModlari[iso] ?? (isHalfDay(iso, turL) ? "yarim" : "tam");
+                      return (
+                        <li
+                          key={iso}
+                          className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100/80 pb-1.5 text-[11px] last:border-0 last:pb-0"
+                        >
+                          <span className="min-w-[6rem] font-medium text-slate-800">
+                            {isoToDdMmYyyy(iso)}
+                          </span>
+                          <span className="inline-flex rounded-md border border-slate-200 bg-white p-0.5 shadow-sm">
+                            <button
+                              type="button"
+                              className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+                                mod === "tam"
+                                  ? "bg-blue-600 text-white"
+                                  : "text-slate-600 hover:bg-slate-50"
+                              }`}
+                              onClick={() =>
+                                setMazeretGunModlari((m) => ({ ...m, [iso]: "tam" }))
+                              }
+                            >
+                              Tam gun
+                            </button>
+                            <button
+                              type="button"
+                              className={`rounded px-2 py-0.5 text-[10px] font-semibold ${
+                                mod === "yarim"
+                                  ? "bg-blue-600 text-white"
+                                  : "text-slate-600 hover:bg-slate-50"
+                              }`}
+                              onClick={() =>
+                                setMazeretGunModlari((m) => ({ ...m, [iso]: "yarim" }))
+                              }
+                            >
+                              Yarim gun
+                            </button>
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
             </div>
 
             </div>
