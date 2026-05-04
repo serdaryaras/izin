@@ -463,12 +463,12 @@ function izinGunlukYuk(
   return 1;
 }
 
-/** Aylik takvim hucresi: yillik yarim gun Y1/2, diger turlerde yarim gun ise kisaltma + ½. */
+/** Aylik takvim hucresi: yillik yarim gun Y1/2, diger turlerde yarim gun ise kisaltma + 1/2. */
 function aylikTakvimRozetMetni(izin: Izin, dayIso: string, tatilMap: Map<string, string>): string {
   const yuk = izinGunlukYuk(izin, dayIso, tatilMap);
   const yarimGun = yuk > 0 && yuk < 1;
   if (yarimGun && izin.izin_tipi === "yillik") return "Y1/2";
-  if (yarimGun) return `${izinKisaltma[izin.izin_tipi]}½`;
+  if (yarimGun) return `${izinKisaltma[izin.izin_tipi]}1/2`;
   return izinKisaltma[izin.izin_tipi];
 }
 
@@ -2114,17 +2114,17 @@ export default function Home() {
             ) : null}
 
             <div className="col-span-full mt-2 min-w-0 rounded-lg border border-slate-200 bg-white/90 p-3 shadow-inner">
-              <div className="mb-2 flex min-w-0 flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="text-xs font-semibold text-slate-800">Yillik takvimden tarih secimi</h3>
-                  <p className="text-[11px] leading-relaxed text-slate-600">
-                    Gunler tek tek secilir. Tekrar tiklanan gun secimden cikar.
-                    Secilen tur rengi tiklanan gunlerde kullanilir. Personel seciliyse mevcut kayitlar kisaltma ile
-                    gosterilir. Arefe / 28 Ekim yeni eklemede varsayilan yari gundur; asagidaki listeden her gunu
-                    bagimsiz Tam veya Yarim yapabilirsiniz. Metinle yalnizca tek gun (baslangic = bitis) girerseniz
-                    Tam / Yarim ayni sekilde secilebilir; cok gunluk aralikta gunler tam sayilir.
-                  </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <div className="mb-2 min-w-0">
+                <h3 className="text-xs font-semibold text-slate-800">Yillik takvimden tarih secimi</h3>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
+                  Gunler tek tek secilir. Tekrar tiklanan gun secimden cikar.
+                  Secilen tur rengi tiklanan gunlerde kullanilir. Personel seciliyse mevcut kayitlar kisaltma ile
+                  gosterilir. Arefe / 28 Ekim yeni eklemede varsayilan yari gundur; asagidaki listeden her gunu
+                  bagimsiz Tam veya Yarim yapabilirsiniz. Metinle yalnizca tek gun (baslangic = bitis) girerseniz
+                  Tam / Yarim ayni sekilde secilebilir; cok gunluk aralikta gunler tam sayilir.
+                </p>
+                <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                     {(["yillik", "rapor", "dis", "evlilik", "cenaze", "dogum"] as IzinKod[]).map((kod) => {
                       const turAd = izinTurleri.find((t) => t.kod === kod)?.ad ?? kod;
                       return (
@@ -2139,36 +2139,36 @@ export default function Home() {
                       );
                     })}
                   </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-[11px] font-semibold text-slate-600">Yil</label>
-                  <select
-                    className={`${mazeretFieldClass} h-8 w-auto min-w-[5.5rem]`}
-                    value={mazeretTakvimYil}
-                    onChange={(e) => {
-                      setMazeretTakvimYil(Number(e.target.value));
-                      setMazeretTakvimSeciliGunler([]);
-                      setMazeretGunModlari({});
-                      setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
-                    }}
-                  >
-                    {mazeretTakvimYilSecenekleri.map((y) => (
-                      <option key={y} value={y}>
-                        {y}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
-                    onClick={() => {
-                      setMazeretTakvimSeciliGunler([]);
-                      setMazeretGunModlari({});
-                      setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
-                    }}
-                  >
-                    Tarihleri temizle
-                  </button>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <label className="text-[11px] font-semibold text-slate-600">Yil</label>
+                    <select
+                      className={`${mazeretFieldClass} h-8 w-auto min-w-[5.5rem]`}
+                      value={mazeretTakvimYil}
+                      onChange={(e) => {
+                        setMazeretTakvimYil(Number(e.target.value));
+                        setMazeretTakvimSeciliGunler([]);
+                        setMazeretGunModlari({});
+                        setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
+                      }}
+                    >
+                      {mazeretTakvimYilSecenekleri.map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+                      onClick={() => {
+                        setMazeretTakvimSeciliGunler([]);
+                        setMazeretGunModlari({});
+                        setIzinForm((prev) => ({ ...prev, baslangic: "", bitis: "" }));
+                      }}
+                    >
+                      Tarihleri temizle
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2262,7 +2262,7 @@ export default function Home() {
                                       disabled={!buAy}
                                       onClick={() => buAy && mazeretTakvimGunTik(iso)}
                                       className={[
-                                        "flex h-5 w-full min-w-0 items-center justify-center rounded-sm leading-none",
+                                        "flex min-h-8 w-full min-w-0 flex-col items-center justify-center gap-0 rounded-sm px-0.5 py-0.5 leading-none",
                                         zemini,
                                         buAy ? "cursor-pointer hover:brightness-95" : "cursor-default opacity-60",
                                       ].join(" ")}
@@ -2278,18 +2278,26 @@ export default function Home() {
                                               : `${isoToDdMmYyyy(iso)} — Tikla`
                                       }
                                     >
-                                      <span className={["inline-flex items-center gap-0.5", buAy ? "font-medium" : ""].join(" ")}>
-                                        <span>{gunTarih.getDate()}</span>
-                                        {buAy && secimGoster && secimMod === "yarim" && (
-                                          <span className="text-[7px] font-semibold opacity-90">½</span>
-                                        )}
-                                        {buAy && secimGoster && secimMod === "tam" && (
-                                          <span className="text-[7px] font-semibold opacity-90">1</span>
-                                        )}
-                                        {buAy && !secimGoster && yarim && (
-                                          <span className="text-[8px] font-normal opacity-80">(1/2)</span>
-                                        )}
+                                      <span className="text-[9px] font-medium leading-none">
+                                        {gunTarih.getDate()}
                                       </span>
+                                      {buAy && secimGoster ? (
+                                        <span className="text-[6px] font-bold leading-none tracking-tight opacity-95">
+                                          {secimMod === "yarim" ? "1/2" : "1"}
+                                        </span>
+                                      ) : buAy && mevcutGoster && mevcut ? (
+                                        <span className="max-w-full truncate text-[5.5px] font-bold leading-none tracking-tight">
+                                          {aylikTakvimRozetMetni(mevcut, iso, tatilMap)}
+                                        </span>
+                                      ) : buAy &&
+                                        yarim &&
+                                        takvimGunuGecerli &&
+                                        !secimGoster &&
+                                        !mevcutGoster ? (
+                                        <span className="text-[6px] font-normal leading-none opacity-80">
+                                          1/2
+                                        </span>
+                                      ) : null}
                                     </button>
                                   </td>
                                 );
