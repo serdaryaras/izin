@@ -38,7 +38,15 @@ type MovementRow = {
 };
 type EmploymentRange = { ise: string | null; ayrilis: string | null };
 type IzinTuruOption = Pick<Tables<"izin_turleri">, "kod" | "ad">;
-type SelectedMazeretCell = { personel: string; tarih: string; tip: "full" | "half" };
+type SelectedMazeretCell = { personel: string; tarih: string; tip: "full" | "half"; izinId?: string };
+type LeaveDayRecord = {
+  id: string;
+  izin_tipi: string;
+  aciklama: string | null;
+  gun: number;
+  baslangic: string;
+  bitis: string;
+};
 
 const DAILY_TARGET_MIN = 8 * 60 + 30;
 const HALF_DAY_TARGET_MIN = DAILY_TARGET_MIN / 2;
@@ -272,6 +280,7 @@ export default function PdksPage() {
   const [importedRawMovements, setImportedRawMovements] = useState<MovementRow[]>([]);
   const [employmentRanges, setEmploymentRanges] = useState<Record<string, EmploymentRange>>({});
   const [leaveDayStatusMap, setLeaveDayStatusMap] = useState<Record<string, string>>({});
+  const [leaveRecordByKey, setLeaveRecordByKey] = useState<Record<string, LeaveDayRecord>>({});
   const [holidayDayTypeMap, setHolidayDayTypeMap] = useState<Record<string, "full" | "half">>({});
   const [personelIdByNorm, setPersonelIdByNorm] = useState<Record<string, string>>({});
   const [izinTurleri, setIzinTurleri] = useState<IzinTuruOption[]>([]);
@@ -500,7 +509,7 @@ export default function PdksPage() {
           const sb = getSupabaseClient();
           const [{ data: personeller }, { data: izinler }, resmiRes, { data: izinTurleriData }] = await Promise.all([
             sb.from("personel").select("id,ad,ise_giris,ayrilis_tarihi"),
-            sb.from("izinler").select("personel_id,izin_tipi,baslangic,bitis,gun,gun_sayisi"),
+            sb.from("izinler").select("id,personel_id,izin_tipi,baslangic,bitis,gun,gun_sayisi,aciklama"),
             sb.from("resmi_tatil_gunleri").select("*"),
             sb.from("izin_turleri").select("kod,ad").order("ad", { ascending: true }),
           ]);
@@ -511,17 +520,30 @@ export default function PdksPage() {
           });
           setPersonelIdByNorm(personelIdObj);
           setIzinTurleri((izinTurleriData ?? [{ kod: "yillik", ad: "Yillik Izin" }]).map((t) => ({ kod: t.kod, ad: t.ad })));
+          const leaveRecObj: Record<string, LeaveDayRecord> = {};
           (izinler ?? []).forEach((i) => {
             const ad = personelAdById.get(i.personel_id);
             if (!ad) return;
             const from = new Date(i.baslangic + "T00:00:00");
             const to = new Date(i.bitis + "T00:00:00");
-            const yarimGunKaydi = i.baslangic === i.bitis && ((i.gun ?? i.gun_sayisi ?? 1) <= 0.5);
+            const gunDegeri = i.gun ?? i.gun_sayisi ?? 1;
+            const yarimGunKaydi = i.baslangic === i.bitis && gunDegeri <= 0.5;
             const durumDegeri = yarimGunKaydi ? `${i.izin_tipi} yarim` : i.izin_tipi;
+            const rec: LeaveDayRecord = {
+              id: i.id,
+              izin_tipi: i.izin_tipi,
+              aciklama: i.aciklama ?? null,
+              gun: gunDegeri,
+              baslangic: i.baslangic,
+              bitis: i.bitis,
+            };
             for (let d = new Date(from); d.getTime() <= to.getTime(); d.setDate(d.getDate() + 1)) {
-              mazeretMap.set(`${normalizeText(ad)}__${fmtDateKey(d)}`, durumDegeri);
+              const key = `${normalizeText(ad)}__${fmtDateKey(d)}`;
+              mazeretMap.set(key, durumDegeri);
+              leaveRecObj[key] = rec;
             }
           });
+          setLeaveRecordByKey(leaveRecObj);
           const allHolidayRows = ([...(resmiRes.data ?? [])] as Record<string, unknown>[]);
           const diniFullDays: string[] = [];
           allHolidayRows.forEach((row) => {
@@ -549,9 +571,11 @@ export default function PdksPage() {
         } catch {
           // Mazeret okunamasa da duzeltme ekraninin hesaplari devam etsin.
           setIzinTurleri([{ kod: "yillik", ad: "Yillik Izin" }]);
+          setLeaveRecordByKey({});
         }
       } else {
         setIzinTurleri([{ kod: "yillik", ad: "Yillik Izin" }]);
+        setLeaveRecordByKey({});
       }
       const nextMazeretCount = mazeretMap.size;
       const leaveMapObj: Record<string, string> = {};
@@ -1062,12 +1086,20 @@ export default function PdksPage() {
     () => Object.values(selectedMazeretCells).sort((a, b) => (a.personel === b.personel ? a.tarih.localeCompare(b.tarih) : a.personel.localeCompare(b.personel, "tr"))),
     [selectedMazeretCells],
   );
+  const seciliYeniMazeretHucreler = useMemo(
+    () => seciliMazeretHucreler.filter((x) => !x.izinId),
+    [seciliMazeretHucreler],
+  );
+  const seciliKayitliMazeretHucreler = useMemo(
+    () => seciliMazeretHucreler.filter((x) => !!x.izinId),
+    [seciliMazeretHucreler],
+  );
   const izinTipiSecenekleri = useMemo(() => {
     if (izinTurleri.length > 0) return izinTurleri;
     return [{ kod: "yillik", ad: "Yillik Izin" }];
   }, [izinTurleri]);
   useEffect(() => {
-    if (izinTipiSecenekleri.some((t) => t.kod === kartIzinTipi)) return;
+    if (kartIzinTipi) return;
     setKartIzinTipi(izinTipiSecenekleri[0]?.kod ?? "yillik");
   }, [izinTipiSecenekleri, kartIzinTipi]);
   function getMazeretAdayTip(row: DailyRow | undefined, leaveCode: string, iso: string): "full" | "half" | null {
@@ -1091,8 +1123,8 @@ export default function PdksPage() {
       tarih: iso,
     }));
   }
-  function toggleMazeretCell(personel: string, iso: string, tip: "full" | "half" | null) {
-    if (!tip) return;
+  function toggleMazeretCell(personel: string, iso: string, tip: "full" | "half" | null, izinId?: string) {
+    if (!tip && !izinId) return;
     const key = `${normalizeText(personel)}__${iso}`;
     setSelectedMazeretCells((prev) => {
       if (prev[key]) {
@@ -1100,25 +1132,28 @@ export default function PdksPage() {
         delete next[key];
         return next;
       }
-      return { ...prev, [key]: { personel, tarih: iso, tip } };
+      return { ...prev, [key]: { personel, tarih: iso, tip: tip ?? "full", izinId } };
     });
+  }
+  function selectedIzinIds(): string[] {
+    return [...new Set(seciliKayitliMazeretHucreler.map((x) => x.izinId).filter((id): id is string => !!id))];
   }
   async function saveSelectedMazeretFromCard() {
     if (!hasSupabaseEnv) {
       setError("Supabase baglantisi bulunamadi.");
       return;
     }
-    if (seciliMazeretHucreler.length === 0) {
-      setError("Kayit icin takvimden en az bir uygun hucre secin.");
+    if (seciliYeniMazeretHucreler.length === 0) {
+      setError("Kayit icin takvimden en az bir uygun bos hucre secin.");
       return;
     }
     const sb = getSupabaseClient();
-    const missingPersoneller = seciliMazeretHucreler.filter((x) => !personelIdByNorm[normalizeText(x.personel)]);
+    const missingPersoneller = seciliYeniMazeretHucreler.filter((x) => !personelIdByNorm[normalizeText(x.personel)]);
     if (missingPersoneller.length > 0) {
       setError(`Personel kaydi bulunamayan hucreler var: ${missingPersoneller.map((x) => x.personel).join(", ")}`);
       return;
     }
-    const cakisanlar = seciliMazeretHucreler.filter((x) => leaveDayStatusMap[`${normalizeText(x.personel)}__${x.tarih}`]);
+    const cakisanlar = seciliYeniMazeretHucreler.filter((x) => leaveDayStatusMap[`${normalizeText(x.personel)}__${x.tarih}`]);
     if (cakisanlar.length > 0) {
       setError(`Secili gunlerden bazilarinda zaten izin kaydi var: ${cakisanlar.map((x) => `${x.personel} ${x.tarih}`).join(", ")}`);
       return;
@@ -1126,7 +1161,7 @@ export default function PdksPage() {
     setKartKaydediliyor(true);
     setError("");
     setNotice("");
-    const payloads = seciliMazeretHucreler.map((x) => {
+    const payloads = seciliYeniMazeretHucreler.map((x) => {
       const gun = x.tip === "half" ? 0.5 : 1;
       return {
         personel_id: personelIdByNorm[normalizeText(x.personel)],
@@ -1145,6 +1180,72 @@ export default function PdksPage() {
       return;
     }
     setNotice(`${payloads.length} hucre icin mazeret kaydi eklendi.`);
+    setSelectedMazeretCells({});
+    await processAll();
+  }
+  async function updateSelectedMazeretFromCard() {
+    if (!hasSupabaseEnv) {
+      setError("Supabase baglantisi bulunamadi.");
+      return;
+    }
+    const ids = selectedIzinIds();
+    if (ids.length === 0) {
+      setError("Guncellemek icin rozetli bir kayit hucresi secin.");
+      return;
+    }
+    if (!kartIzinTipi) {
+      setError("Guncelleme icin mazeret turu secin.");
+      return;
+    }
+    const sb = getSupabaseClient();
+    setKartKaydediliyor(true);
+    setError("");
+    setNotice("");
+    const { error: updateError } = await sb
+      .from("izinler")
+      .update({
+        izin_tipi: kartIzinTipi,
+        aciklama: kartIzinAciklama.trim() || null,
+      })
+      .in("id", ids);
+    setKartKaydediliyor(false);
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+    setNotice(`${ids.length} mazeret kaydi guncellendi.`);
+    setSelectedMazeretCells({});
+    await processAll();
+  }
+  async function deleteSelectedMazeretFromCard() {
+    if (!hasSupabaseEnv) {
+      setError("Supabase baglantisi bulunamadi.");
+      return;
+    }
+    const ids = selectedIzinIds();
+    if (ids.length === 0) {
+      setError("Silmek icin rozetli bir kayit hucresi secin.");
+      return;
+    }
+    const aralikKayitlari = seciliKayitliMazeretHucreler
+      .map((x) => leaveRecordByKey[`${normalizeText(x.personel)}__${x.tarih}`])
+      .filter((rec): rec is LeaveDayRecord => !!rec && rec.baslangic !== rec.bitis);
+    const uniqueAralik = [...new Map(aralikKayitlari.map((r) => [r.id, r])).values()];
+    const onayMetni = uniqueAralik.length > 0
+      ? `Secilen kayitlardan bazilari birden fazla gunu kapsiyor (${uniqueAralik.map((r) => `${r.baslangic} / ${r.bitis}`).join(", ")}). Tum aralik silinecek. Devam edilsin mi?`
+      : `${ids.length} mazeret kaydi silinecek. Devam edilsin mi?`;
+    if (!window.confirm(onayMetni)) return;
+    const sb = getSupabaseClient();
+    setKartKaydediliyor(true);
+    setError("");
+    setNotice("");
+    const { error: deleteError } = await sb.from("izinler").delete().in("id", ids);
+    setKartKaydediliyor(false);
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+    setNotice(`${ids.length} mazeret kaydi silindi.`);
     setSelectedMazeretCells({});
     await processAll();
   }
@@ -1357,6 +1458,9 @@ export default function PdksPage() {
               value={kartIzinTipi}
               onChange={(e) => setKartIzinTipi(e.target.value)}
             >
+              {kartIzinTipi && !izinTipiSecenekleri.some((t) => t.kod === kartIzinTipi) ? (
+                <option value={kartIzinTipi}>{kartIzinTipi}</option>
+              ) : null}
               {izinTipiSecenekleri.map((t) => <option key={`kart-izin-${t.kod}`} value={t.kod}>{t.ad}</option>)}
             </select>
             <input
@@ -1368,13 +1472,27 @@ export default function PdksPage() {
             <button
               className="rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void saveSelectedMazeretFromCard()}
-              disabled={kartKaydediliyor || seciliMazeretHucreler.length === 0}
+              disabled={kartKaydediliyor || seciliYeniMazeretHucreler.length === 0}
             >
-              {kartKaydediliyor ? "Kaydediliyor..." : `Secili Hucrelere Mazeret Kaydet (${seciliMazeretHucreler.length})`}
+              {kartKaydediliyor ? "Kaydediliyor..." : `Secili Hucrelere Mazeret Kaydet (${seciliYeniMazeretHucreler.length})`}
+            </button>
+            <button
+              className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void updateSelectedMazeretFromCard()}
+              disabled={kartKaydediliyor || seciliKayitliMazeretHucreler.length === 0}
+            >
+              {kartKaydediliyor ? "Guncelleniyor..." : `Secili Kayitlari Guncelle (${seciliKayitliMazeretHucreler.length})`}
+            </button>
+            <button
+              className="rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => void deleteSelectedMazeretFromCard()}
+              disabled={kartKaydediliyor || seciliKayitliMazeretHucreler.length === 0}
+            >
+              {kartKaydediliyor ? "Siliniyor..." : `Secili Kayitlari Sil (${seciliKayitliMazeretHucreler.length})`}
             </button>
           </div>
           <p className="mt-2 text-[11px] text-slate-500">
-            Mavi ince cerceveli hucreler secilebilir. Kural: hic gelinmeyen veya net/brut calisma suresi 04:30 ve alti olan gunler (Cumartesi dahil).
+            Mavi ince cerceveli hucreler yeni mazeret icin secilebilir. Rozetli (Y, D, ...) kayitlara tiklayarak silme veya tur/aciklama guncelleme yapabilirsiniz. Kural: hic gelinmeyen veya net/brut calisma suresi 04:30 ve alti olan gunler (Cumartesi dahil).
           </p>
           <div className="mt-3 overflow-hidden rounded-xl ring-[0.5px] ring-slate-400">
             <div className="overflow-auto" data-aylik-bakiye-table-wrap>
@@ -1437,10 +1555,11 @@ export default function PdksPage() {
                         const bakiyeText = row && !noWorkOnNonWorkingDay ? row.bakiye : "";
                         const leaveCode = izinKodKisaltmaFromDurum(cellDurum);
                         const displayLeaveCode = getLeaveBadgeLabel(leaveCode, cellDurum, holidayType);
-                        const mazeretAdayTip = getMazeretAdayTip(row, leaveCode, iso);
                         const secimKey = `${normalizeText(p)}__${iso}`;
+                        const leaveRec = leaveRecordByKey[secimKey];
+                        const mazeretAdayTip = getMazeretAdayTip(row, leaveCode, iso);
                         const seciliMazeretHucre = !!selectedMazeretCells[secimKey];
-                        const secilebilirHucre = !!mazeretAdayTip;
+                        const secilebilirHucre = !!mazeretAdayTip || !!leaveRec;
                         const beklenenMin = row ? hhmmToMinutes(row.beklenen) : 0;
                         const hareketYokCalismaGunu = !!row && beklenenMin > 0 && brutMin <= 0 && !leaveCode;
                         const calismaDisiVeKayitYok = calismaDisi && !row;
@@ -1463,13 +1582,23 @@ export default function PdksPage() {
                                   ? "bg-red-300"
                                   : cellBg
                             } ${seciliMazeretHucre ? "ring-2 ring-inset ring-sky-500" : ""} ${secilebilirHucre ? "ring-1 ring-inset ring-sky-200" : ""} cursor-pointer`}
-                            title={secilebilirHucre ? "Tiklayinca gun hareketleri acilir; mazeret icin uygunsa secilir" : (hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : "Bu gunun giris-cikis hareketlerini goster")}
+                            title={leaveRec ? "Kaydi secmek icin tiklayin (sil / guncelle)" : (secilebilirHucre ? "Tiklayinca gun hareketleri acilir; mazeret icin uygunsa secilir" : (hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : "Bu gunun giris-cikis hareketlerini goster"))}
                             onClick={() => {
                               inspectPersonelGun(p, iso);
+                              if (leaveRec) {
+                                const already = !!selectedMazeretCells[secimKey];
+                                const tip: "full" | "half" = leaveRec.baslangic === leaveRec.bitis && leaveRec.gun <= 0.5 ? "half" : "full";
+                                toggleMazeretCell(p, iso, tip, leaveRec.id);
+                                if (!already) {
+                                  setKartIzinTipi(leaveRec.izin_tipi);
+                                  setKartIzinAciklama(leaveRec.aciklama ?? "");
+                                }
+                                return;
+                              }
                               toggleMazeretCell(p, iso, mazeretAdayTip);
                             }}
                             onMouseDown={(e) => {
-                              if (!mazeretAdayTip) return;
+                              if (!secilebilirHucre) return;
                               e.preventDefault();
                             }}
                           >
