@@ -1091,8 +1091,14 @@ export default function PdksPage() {
             ],
           });
           const bytes = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
+          const payload = new ArrayBuffer(bytes.byteLength);
+          new Uint8Array(payload).set(bytes);
           const writable = await handle.createWritable();
-          await writable.write(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+          await writable.write(
+            new Blob([payload], {
+              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }),
+          );
           await writable.close();
           setError("");
           setNotice(`Duzeltilmis veri dosyasi kaydedildi: ${handle.name}`);
