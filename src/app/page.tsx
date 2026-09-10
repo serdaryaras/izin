@@ -215,11 +215,42 @@ function hucreyiTarihMetnine(v: unknown): string {
   return String(v).trim().replace(/\//g, ".");
 }
 
-function personelBulAdla(personeller: Personel[], ad: string): Personel | null {
+function personelDonemiKapsar(p: Personel, gunIso: string): boolean {
+  if (p.ise_giris && gunIso < p.ise_giris) return false;
+  if (p.ayrilis_tarihi && String(p.ayrilis_tarihi).trim() !== "" && gunIso > p.ayrilis_tarihi) return false;
+  return true;
+}
+
+function personelDonemEtiketi(p: Personel): string {
+  const giris = isoToDdMmYyyy(p.ise_giris);
+  const ayrilis = p.ayrilis_tarihi ? isoToDdMmYyyy(p.ayrilis_tarihi) : "devam";
+  return `${p.ad} (${giris} – ${ayrilis})`;
+}
+
+function personelGorunenAd(p: Personel, hepsi: Personel[]): string {
+  const k = adKeyTr(p.ad);
+  if (hepsi.filter((x) => adKeyTr(x.ad) === k).length > 1) return personelDonemEtiketi(p);
+  return p.ad;
+}
+
+function personelBulAdla(personeller: Personel[], ad: string, gunIso?: string): Personel | null {
   const k = adKeyTr(ad);
   if (!k) return null;
   const uygun = personeller.filter((p) => adKeyTr(p.ad) === k);
-  return uygun[0] ?? null;
+  if (uygun.length === 0) return null;
+  if (uygun.length === 1) return uygun[0];
+  if (gunIso) {
+    const donem = uygun.filter((p) => personelDonemiKapsar(p, gunIso));
+    if (donem.length === 1) return donem[0];
+    if (donem.length > 1) {
+      const aktif = donem.filter(personelAktifMi);
+      if (aktif.length === 1) return aktif[0];
+      return donem.slice().sort((a, b) => b.ise_giris.localeCompare(a.ise_giris))[0];
+    }
+  }
+  const aktif = uygun.filter(personelAktifMi);
+  if (aktif.length === 1) return aktif[0];
+  return null;
 }
 
 /** D bos veya yok: yillik; aksi halde tablo izin turu adi veya bilinen kisa ad */
@@ -660,6 +691,7 @@ export default function Home() {
   const [tatiller, setTatiller] = useState<Tatil[]>([]);
 
   const [selectedPersonelId, setSelectedPersonelId] = useState<string>("");
+  const [personelKartKaynak, setPersonelKartKaynak] = useState<"aktif" | "tumu">("aktif");
   /** takvim: personel listesi kaynagi */
   const [takvimKaynak, setTakvimKaynak] = useState<"aktif" | "tumu">("aktif");
   /** tumu: kapsamdaki herkes; secili: sadece isaretlenenler */
@@ -758,7 +790,11 @@ export default function Home() {
       return;
     }
 
-    const pList = (pRes.data ?? []) as Personel[];
+    const pList = ((pRes.data ?? []) as Personel[]).slice().sort((a, b) => {
+      const ad = a.ad.localeCompare(b.ad, "tr");
+      if (ad !== 0) return ad;
+      return a.ise_giris.localeCompare(b.ise_giris);
+    });
     const izinTurleriRaw = (tRes.data ?? []) as IzinTuru[];
     const varsayilanTurler: IzinTuru[] = [
       { kod: "yillik", ad: "Yillik Izin", yillik_izinden_duser: true, varsayilan_hak_gun: null, cinsiyet_bagli: false },
@@ -815,6 +851,17 @@ export default function Home() {
       : personeller;
   }, [personeller, takvimKaynak]);
 
+  const personelKartHavuzu = useMemo(() => {
+    const havuz = personelKartKaynak === "aktif"
+      ? personeller.filter(personelAktifMi)
+      : personeller;
+    if (selectedPersonelId && !havuz.some((p) => p.id === selectedPersonelId)) {
+      const secili = personeller.find((p) => p.id === selectedPersonelId);
+      if (secili) return [secili, ...havuz];
+    }
+    return havuz;
+  }, [personeller, personelKartKaynak, selectedPersonelId]);
+
   useEffect(() => {
     setTakvimSeciliIds((prev) => prev.filter((id) => takvimPersonelHavuzu.some((p) => p.id === id)));
   }, [takvimPersonelHavuzu]);
@@ -827,7 +874,7 @@ export default function Home() {
 
   useEffect(() => {
     const p = personeller.find((x) => x.id === izinForm.personel_id);
-    if (izinForm.personel_id && p) setMazeretPersonelArama(p.ad);
+    if (izinForm.personel_id && p) setMazeretPersonelArama(personelGorunenAd(p, personeller));
   }, [izinForm.personel_id, personeller]);
 
   useEffect(() => {
@@ -848,15 +895,16 @@ export default function Home() {
     if (mazeretPersonelFiltre.length !== 1) return;
     const only = mazeretPersonelFiltre[0];
     if (izinForm.personel_id === only.id) {
-      if (mazeretPersonelArama !== only.ad) {
-        setMazeretPersonelArama(only.ad);
+      const etiket = personelGorunenAd(only, personeller);
+      if (mazeretPersonelArama !== etiket) {
+        setMazeretPersonelArama(etiket);
         setMazeretPersonelListeAcik(false);
       }
       return;
     }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIzinForm((prev) => ({ ...prev, personel_id: only.id }));
-    setMazeretPersonelArama(only.ad);
+    setMazeretPersonelArama(personelGorunenAd(only, personeller));
     setMazeretPersonelListeAcik(false);
   }, [mazeretPersonelFiltre, mazeretPersonelArama, izinForm.personel_id]);
 
@@ -1124,10 +1172,28 @@ export default function Home() {
       ayrilis_tarihi: ayrilisIso,
       cinsiyet: personelForm.cinsiyet,
     };
+    const ayniAdKayitlar = personeller.filter((p) => adKeyTr(p.ad) === adKeyTr(payload.ad));
+    if (ayniAdKayitlar.length > 0) {
+      const ozet = ayniAdKayitlar.map((p) => personelDonemEtiketi(p)).join("\n");
+      const onay = window.confirm(
+        `Ayni isimde kayit var:\n${ozet}\n\nYeni kayit AYRI personel ID ile olusur. Izin hakki yeni ise giris tarihinden baslar; eski izinler karismaz. Devam edilsin mi?`,
+      );
+      if (!onay) {
+        setSaving(false);
+        return;
+      }
+    }
     const { error: insError } = await sb.from("personel").insert(payload);
-    if (insError) setError(insError.message);
-    else {
-      setInfo("Personel eklendi.");
+    if (insError) {
+      const msg = insError.message || "";
+      setError(
+        /duplicate|unique|uniq/i.test(msg)
+          ? "Ayni personel adi veritabaninda tekil kayitli. Donen personel icin personel.ad unique kisitini kaldirip tekrar Ekle deyiniz."
+          : insError.message,
+      );
+    } else {
+      setInfo("Personel eklendi. Yeni kayit ayri ID ile olustu; izin hakki bu ise giris tarihinden baslar.");
+      setSelectedPersonelId("");
       await loadData();
     }
     setSaving(false);
@@ -1389,14 +1455,6 @@ export default function Home() {
           if (adHam == null || String(adHam).trim() === "") continue;
 
           const satirNo = i + 1;
-          const p = personelBulAdla(personeller, String(adHam));
-          if (!p) {
-            hatalar.push(
-              `Satir ${satirNo}: Personel bulunamadi: "${String(adHam).trim()}"`,
-            );
-            continue;
-          }
-
           const basTr = hucreyiTarihMetnine(row[1]);
           const bitTr = hucreyiTarihMetnine(row[2]);
           const basIso = ddMmYyyyToIso(basTr);
@@ -1409,6 +1467,17 @@ export default function Home() {
           }
           if (basIso > bitIso) {
             hatalar.push(`Satir ${satirNo}: Baslangic bitisten sonra.`);
+            continue;
+          }
+
+          const p = personelBulAdla(personeller, String(adHam), basIso);
+          if (!p) {
+            const ayniAd = personeller.filter((x) => adKeyTr(x.ad) === adKeyTr(String(adHam))).length > 1;
+            hatalar.push(
+              ayniAd
+                ? `Satir ${satirNo}: "${String(adHam).trim()}" icin birden fazla donem kaydi var; tarih hicbir ise giris/ayrilis araligina dusmedi.`
+                : `Satir ${satirNo}: Personel bulunamadi: "${String(adHam).trim()}"`,
+            );
             continue;
           }
 
@@ -1688,7 +1757,7 @@ export default function Home() {
           }),
           new Paragraph({
             children: [
-              new TextRun({ text: `Çalışan: ${r.personel.ad}   `, bold: true }),
+              new TextRun({ text: `Çalışan: ${personelGorunenAd(r.personel, personeller)}   `, bold: true }),
               new TextRun({ text: `Iktisap Tarihi: ${isoToDdMmYyyy(r.iktisapIso)}   ` }),
               new TextRun({
                 text: `Rapor Araligi: ${isoToDdMmYyyy(r.raporBasIso)} - ${isoToDdMmYyyy(r.raporSonIso)}   `,
@@ -1946,14 +2015,15 @@ export default function Home() {
                 value={mazeretPersonelArama}
                 onChange={(e) => {
                   const sel = personeller.find((p) => p.id === izinForm.personel_id);
+                  const etiket = sel ? personelGorunenAd(sel, personeller) : "";
                   const v = sel
-                    ? combValueAfterFullSelection(e.target.value, sel.ad, mazeretPersonelArama)
+                    ? combValueAfterFullSelection(e.target.value, etiket, mazeretPersonelArama)
                     : e.target.value;
                   setMazeretPersonelArama(v);
                   setMazeretPersonelListeAcik(true);
                   setIzinForm((prev) => {
                     const pSel = personeller.find((p) => p.id === prev.personel_id);
-                    if (pSel && pSel.ad === v) return prev;
+                    if (pSel && personelGorunenAd(pSel, personeller) === v) return prev;
                     return { ...prev, personel_id: "" };
                   });
                 }}
@@ -1974,11 +2044,11 @@ export default function Home() {
                           onMouseDown={(ev) => ev.preventDefault()}
                           onClick={() => {
                             setIzinForm((prev) => ({ ...prev, personel_id: p.id }));
-                            setMazeretPersonelArama(p.ad);
+                            setMazeretPersonelArama(personelGorunenAd(p, personeller));
                             setMazeretPersonelListeAcik(false);
                           }}
                         >
-                          {p.ad}
+                          {personelGorunenAd(p, personeller)}
                         </button>
                       </li>
                     ))
@@ -2603,7 +2673,7 @@ export default function Home() {
                         )
                       }
                     />
-                    <span className="truncate">{p.ad}</span>
+                    <span className="truncate">{personelGorunenAd(p, personeller)}</span>
                   </label>
                 ))}
               </div>
@@ -2701,8 +2771,8 @@ export default function Home() {
                 {personelRows.map((row) => (
                   <tr key={row.personel.id}>
                     <td className="sticky left-0 z-10 overflow-hidden border bg-white px-1.5 py-0.5 align-middle shadow-[4px_0_6px_-4px_rgba(0,0,0,0.12)]">
-                      <div className="truncate text-xs font-medium leading-tight" title={row.personel.ad}>
-                        {row.personel.ad}
+                      <div className="truncate text-xs font-medium leading-tight" title={personelGorunenAd(row.personel, personeller)}>
+                        {personelGorunenAd(row.personel, personeller)}
                       </div>
                     </td>
                     {daysInMonth.map((d) => {
@@ -2805,7 +2875,7 @@ export default function Home() {
                         YILLIK UCRETLI IZIN FORMU - SON {r.donemAdedi} DONEM
                       </div>
                       <div className="mb-2 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-                        <div><span className="font-semibold">Çalışan:</span> {r.personel.ad}</div>
+                        <div><span className="font-semibold">Çalışan:</span> {personelGorunenAd(r.personel, personeller)}</div>
                         <div><span className="font-semibold">Iktisap Tarihi:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
                         <div><span className="font-semibold">Rapor Araligi:</span> {isoToDdMmYyyy(r.raporBasIso)} - {isoToDdMmYyyy(r.raporSonIso)}</div>
                         <div><span className="font-semibold">Toplam Gun:</span> {formatGunDegeri(r.toplamGun)}</div>
@@ -2847,8 +2917,22 @@ export default function Home() {
         </section>
 
         <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold">Personel</h2>
+          <h2 className="mb-1 text-lg font-semibold">Personel</h2>
+          <p className="mb-4 text-sm text-slate-500">
+            Ayrilip geri donen personel icin eski kaydi guncellemeyin. Ayni adla Ekle deyince yeni ID olusur; izin hakki yeni ise giris tarihinden baslar, eski izinler karismaz.
+          </p>
           <div className={formGridClass}>
+            <div>
+              <label className={labelClass}>Personel listesi</label>
+              <select
+                className={fieldClass}
+                value={personelKartKaynak}
+                onChange={(e) => setPersonelKartKaynak(e.target.value as "aktif" | "tumu")}
+              >
+                <option value="aktif">Aktif personeller</option>
+                <option value="tumu">Tum personeller</option>
+              </select>
+            </div>
             <div>
               <label className={labelClass}>Secili Personel</label>
               <select
@@ -2857,25 +2941,23 @@ export default function Home() {
                 onChange={(e) => setSelectedPersonelId(e.target.value)}
               >
                 <option value="">Personel sec</option>
-                {personeller.map((p) => (
+                {personelKartHavuzu.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.ad}
+                    {personelDonemEtiketi(p)}
                   </option>
                 ))}
               </select>
             </div>
 
-            {!selectedPersonelId && (
-              <div>
-                <label className={labelClass}>Ad Soyad</label>
-                <input
-                  className={fieldClass}
-                  placeholder="Orn: Ali Veli"
-                  value={personelForm.ad}
-                  onChange={(e) => setPersonelForm((prev) => ({ ...prev, ad: e.target.value }))}
-                />
-              </div>
-            )}
+            <div>
+              <label className={labelClass}>Ad Soyad</label>
+              <input
+                className={fieldClass}
+                placeholder="Orn: Ali Veli"
+                value={personelForm.ad}
+                onChange={(e) => setPersonelForm((prev) => ({ ...prev, ad: e.target.value }))}
+              />
+            </div>
             <div>
               <label className={labelClass}>Dogum Tarihi (gg.aa.yyyy)</label>
               <input
@@ -2985,7 +3067,7 @@ export default function Home() {
             </div>
           )}
 
-          <form onSubmit={handlePersonelInsert} className="mt-3 flex flex-wrap gap-2">
+          <form onSubmit={handlePersonelInsert} className="mt-3 flex flex-wrap items-center gap-2">
             <button
               disabled={saving}
               className="rounded-md bg-blue-600 px-4 py-2 text-white disabled:opacity-60"
@@ -3008,6 +3090,9 @@ export default function Home() {
             >
               Mazeret ekstresi (.xlsx)
             </button>
+            <span className="text-xs text-slate-500">
+              Ekle her zaman yeni ID olusturur. Guncelle mevcut kaydi degistirir.
+            </span>
           </form>
         </section>
       </div>

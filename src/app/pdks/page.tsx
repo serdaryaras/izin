@@ -36,7 +36,7 @@ type MovementRow = {
   datetime: Date;
   durum: "G" | "C";
 };
-type EmploymentRange = { ise: string | null; ayrilis: string | null };
+type EmploymentRange = { id: string; ise: string | null; ayrilis: string | null };
 type IzinTuruOption = Pick<Tables<"izin_turleri">, "kod" | "ad">;
 type SelectedMazeretCell = { personel: string; tarih: string; tip: "full" | "half"; izinId?: string };
 type LeaveDayRecord = {
@@ -80,6 +80,43 @@ function normalizeText(value: unknown): string {
 }
 function fmtDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function personelDonemiKapsar(r: { ise: string | null; ayrilis: string | null }, dayIso: string): boolean {
+  if (r.ise && dayIso < r.ise) return false;
+  if (r.ayrilis && dayIso > r.ayrilis) return false;
+  return true;
+}
+function pickEmploymentRange(ranges: EmploymentRange[] | undefined, dayIso: string): EmploymentRange | undefined {
+  if (!ranges || ranges.length === 0) return undefined;
+  const covering = ranges.filter((r) => personelDonemiKapsar(r, dayIso));
+  if (covering.length === 0) return undefined;
+  if (covering.length === 1) return covering[0];
+  const aktif = covering.filter((r) => !r.ayrilis);
+  if (aktif.length === 1) return aktif[0];
+  return covering.slice().sort((a, b) => (b.ise || "").localeCompare(a.ise || ""))[0];
+}
+function buildEmploymentByNorm(
+  personeller: Array<{ id: string; ad: string; ise_giris: string | null; ayrilis_tarihi: string | null }>,
+): Record<string, EmploymentRange[]> {
+  const out: Record<string, EmploymentRange[]> = {};
+  personeller.forEach((p) => {
+    const key = normalizeText(p.ad);
+    if (!out[key]) out[key] = [];
+    out[key].push({ id: p.id, ise: p.ise_giris ?? null, ayrilis: p.ayrilis_tarihi ?? null });
+  });
+  Object.keys(out).forEach((key) => {
+    const sorted = out[key].slice().sort((a, b) => (a.ise || "").localeCompare(b.ise || ""));
+    out[key] = sorted.map((r, idx) => {
+      const next = sorted[idx + 1];
+      if (!r.ayrilis && next?.ise) {
+        const d = new Date(`${next.ise}T00:00:00`);
+        d.setDate(d.getDate() - 1);
+        return { ...r, ayrilis: fmtDateKey(d) };
+      }
+      return r;
+    });
+  });
+  return out;
 }
 function fmtISODateTime(d: Date): string {
   return `${fmtDateKey(d)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -263,6 +300,35 @@ function splitCsv(text: string, delimiter = ","): string[][] {
   return rows.filter((r) => r.some((c) => String(c).trim() !== ""));
 }
 
+const PDKS_FS_PICKER_ID = "pdks-girdi-klasoru";
+
+type PdksFsFileHandle = {
+  name: string;
+  getFile: () => Promise<File>;
+  createWritable: () => Promise<{ write: (data: BufferSource | Blob) => Promise<void>; close: () => Promise<void> }>;
+};
+
+function getOpenFilePicker(w: Window): ((opts: Record<string, unknown>) => Promise<PdksFsFileHandle[]>) | undefined {
+  const fn = (w as Window & { showOpenFilePicker?: (opts: Record<string, unknown>) => Promise<PdksFsFileHandle[]> }).showOpenFilePicker;
+  return typeof fn === "function" ? fn.bind(w) : undefined;
+}
+
+function getSaveFilePicker(w: Window): ((opts: Record<string, unknown>) => Promise<PdksFsFileHandle>) | undefined {
+  const fn = (w as Window & { showSaveFilePicker?: (opts: Record<string, unknown>) => Promise<PdksFsFileHandle> }).showSaveFilePicker;
+  return typeof fn === "function" ? fn.bind(w) : undefined;
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+function assignFileToInput(input: HTMLInputElement | null, file: File) {
+  if (!input) return;
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+}
+
 export default function PdksPage() {
   const [pdksFile, setPdksFile] = useState<File | null>(null);
   const [idariIzinFile, setIdariIzinFile] = useState<File | null>(null);
@@ -278,11 +344,10 @@ export default function PdksPage() {
   const [unmatchedRows, setUnmatchedRows] = useState<UnmatchedRow[]>([]);
   const [allMovements, setAllMovements] = useState<MovementRow[]>([]);
   const [importedRawMovements, setImportedRawMovements] = useState<MovementRow[]>([]);
-  const [employmentRanges, setEmploymentRanges] = useState<Record<string, EmploymentRange>>({});
+  const [employmentRanges, setEmploymentRanges] = useState<Record<string, EmploymentRange[]>>({});
   const [leaveDayStatusMap, setLeaveDayStatusMap] = useState<Record<string, string>>({});
   const [leaveRecordByKey, setLeaveRecordByKey] = useState<Record<string, LeaveDayRecord>>({});
   const [holidayDayTypeMap, setHolidayDayTypeMap] = useState<Record<string, "full" | "half">>({});
-  const [personelIdByNorm, setPersonelIdByNorm] = useState<Record<string, string>>({});
   const [izinTurleri, setIzinTurleri] = useState<IzinTuruOption[]>([]);
   const [kartIzinTipi, setKartIzinTipi] = useState("yillik");
   const [kartIzinAciklama, setKartIzinAciklama] = useState("");
@@ -293,6 +358,8 @@ export default function PdksPage() {
 
   const [manualMovements, setManualMovements] = useState<MovementRow[]>([]);
   const aylikBakiyeKartRef = useRef<HTMLDivElement | null>(null);
+  const pdksFileInputRef = useRef<HTMLInputElement | null>(null);
+  const pdksFileHandleRef = useRef<PdksFsFileHandle | null>(null);
   const [manualForm, setManualForm] = useState({
     personel: "",
     tarih: "",
@@ -392,40 +459,28 @@ export default function PdksPage() {
         if (a.personel !== b.personel) return a.personel.localeCompare(b.personel, "tr");
         return a.datetime.getTime() - b.datetime.getTime();
       });
-      const employmentRangeMap = new Map<string, EmploymentRange>();
+      const employmentRangeMap = new Map<string, EmploymentRange[]>();
       // Ise giris/ayrilis disi hareketleri, eslestirme ve tum hesaplardan once ele.
       if (hasSupabaseEnv) {
         try {
           const sb = getSupabaseClient();
-          const { data: personeller } = await sb.from("personel").select("ad,ise_giris,ayrilis_tarihi");
-          const personelCalismaAraligi = new Map(
-            (personeller ?? []).map((p) => [normalizeText(p.ad), { ise: p.ise_giris, ayrilis: p.ayrilis_tarihi ?? null }]),
-          );
-          const rangesObj: Record<string, EmploymentRange> = {};
-          (personeller ?? []).forEach((p) => {
-            const key = normalizeText(p.ad);
-            const val = { ise: p.ise_giris ?? null, ayrilis: p.ayrilis_tarihi ?? null };
-            employmentRangeMap.set(key, val);
-            rangesObj[key] = val;
-          });
+          const { data: personeller } = await sb.from("personel").select("id,ad,ise_giris,ayrilis_tarihi");
+          const rangesObj = buildEmploymentByNorm(personeller ?? []);
+          Object.entries(rangesObj).forEach(([key, list]) => employmentRangeMap.set(key, list));
           setEmploymentRanges(rangesObj);
           const withinEmployment = (personelAd: string, dayIso: string) => {
-            const r = personelCalismaAraligi.get(normalizeText(personelAd));
-            if (!r) return true;
-            if (r.ise && dayIso < r.ise) return false;
-            if (r.ayrilis && dayIso > r.ayrilis) return false;
-            return true;
+            const list = rangesObj[normalizeText(personelAd)];
+            if (!list || list.length === 0) return true;
+            return !!pickEmploymentRange(list, dayIso);
           };
           const filtered = nextAllMovements.filter((m) => withinEmployment(m.personel, fmtDateKey(m.datetime)));
           nextAllMovements.splice(0, nextAllMovements.length, ...filtered);
         } catch {
           // Personel tarihi okunamazsa mevcut akisla devam.
           setEmploymentRanges({});
-          setPersonelIdByNorm({});
         }
       } else {
         setEmploymentRanges({});
-        setPersonelIdByNorm({});
       }
 
       // Pair G-C
@@ -514,16 +569,18 @@ export default function PdksPage() {
             sb.from("izin_turleri").select("kod,ad").order("ad", { ascending: true }),
           ]);
           const personelAdById = new Map((personeller ?? []).map((p) => [p.id, p.ad]));
-          const personelIdObj: Record<string, string> = {};
-          (personeller ?? []).forEach((p) => {
-            personelIdObj[normalizeText(p.ad)] = p.id;
+          const personelById = new Map((personeller ?? []).map((p) => [p.id, p]));
+          const rangesObj = buildEmploymentByNorm(personeller ?? []);
+          Object.entries(rangesObj).forEach(([key, list]) => {
+            if (!employmentRangeMap.has(key)) employmentRangeMap.set(key, list);
           });
-          setPersonelIdByNorm(personelIdObj);
+          setEmploymentRanges(rangesObj);
           setIzinTurleri((izinTurleriData ?? [{ kod: "yillik", ad: "Yillik Izin" }]).map((t) => ({ kod: t.kod, ad: t.ad })));
           const leaveRecObj: Record<string, LeaveDayRecord> = {};
           (izinler ?? []).forEach((i) => {
-            const ad = personelAdById.get(i.personel_id);
-            if (!ad) return;
+            const p = personelById.get(i.personel_id);
+            const ad = p?.ad ?? personelAdById.get(i.personel_id);
+            if (!ad || !p) return;
             const from = new Date(i.baslangic + "T00:00:00");
             const to = new Date(i.bitis + "T00:00:00");
             const gunDegeri = i.gun ?? i.gun_sayisi ?? 1;
@@ -538,7 +595,9 @@ export default function PdksPage() {
               bitis: i.bitis,
             };
             for (let d = new Date(from); d.getTime() <= to.getTime(); d.setDate(d.getDate() + 1)) {
-              const key = `${normalizeText(ad)}__${fmtDateKey(d)}`;
+              const dayKey = fmtDateKey(d);
+              if (pickEmploymentRange(rangesObj[normalizeText(ad)], dayKey)?.id !== i.personel_id) continue;
+              const key = `${normalizeText(ad)}__${dayKey}`;
               mazeretMap.set(key, durumDegeri);
               leaveRecObj[key] = rec;
             }
@@ -674,11 +733,8 @@ export default function PdksPage() {
           }
         }
         iterateDays.forEach((dayKey) => {
-          const er = employmentRangeMap.get(normalizeText(personel));
-          if (er) {
-            if (er.ise && dayKey < er.ise) return;
-            if (er.ayrilis && dayKey > er.ayrilis) return;
-          }
+          const ranges = employmentRangeMap.get(normalizeText(personel));
+          if (ranges && ranges.length > 0 && !pickEmploymentRange(ranges, dayKey)) return;
           const date = new Date(dayKey + "T00:00:00");
           const intervals = byDay.get(dayKey) ?? [];
           const sorted = intervals.slice().sort((a, b) => a.giris.getTime() - b.giris.getTime());
@@ -959,6 +1015,42 @@ export default function PdksPage() {
     }
   }
 
+  async function applyPdksFile(file: File | null, handle: PdksFsFileHandle | null) {
+    pdksFileHandleRef.current = handle;
+    setPdksFile(file);
+    setImportedRawMovements([]);
+    setAllMovements([]);
+    setManualMovements([]);
+  }
+
+  async function pickPdksFileFromDisk() {
+    const openPicker = getOpenFilePicker(window);
+    if (!openPicker) return false;
+    try {
+      const [handle] = await openPicker({
+        id: PDKS_FS_PICKER_ID,
+        multiple: false,
+        types: [
+          {
+            description: "PDKS dosyasi",
+            accept: {
+              "text/csv": [".csv"],
+              "application/vnd.ms-excel": [".xls"],
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+            },
+          },
+        ],
+      });
+      const file = await handle.getFile();
+      assignFileToInput(pdksFileInputRef.current, file);
+      await applyPdksFile(file, handle);
+      return true;
+    } catch (err) {
+      if (isAbortError(err)) return true;
+      return false;
+    }
+  }
+
   async function exportFinalMovementsAsXlsx() {
     if (allMovements.length === 0) {
       setError("Disa aktarma icin once veri hesaplanmali.");
@@ -981,9 +1073,35 @@ export default function PdksPage() {
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "PDKS");
-      const now = new Date();
-      const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
-      XLSX.writeFile(wb, `pdks-duzeltilmis-son-hali-${stamp}.xlsx`);
+      const fileName = `pdks-duzeltilmis-son-hali-${exportStamp()}.xlsx`;
+      const savePicker = getSaveFilePicker(window);
+      if (savePicker) {
+        try {
+          const handle = await savePicker({
+            id: PDKS_FS_PICKER_ID,
+            suggestedName: fileName,
+            ...(pdksFileHandleRef.current ? { startIn: pdksFileHandleRef.current } : {}),
+            types: [
+              {
+                description: "Excel",
+                accept: {
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+                },
+              },
+            ],
+          });
+          const bytes = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
+          const writable = await handle.createWritable();
+          await writable.write(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+          await writable.close();
+          setError("");
+          setNotice(`Duzeltilmis veri dosyasi kaydedildi: ${handle.name}`);
+          return;
+        } catch (err) {
+          if (isAbortError(err)) return;
+        }
+      }
+      XLSX.writeFile(wb, fileName);
       setError("");
       setNotice("Duzeltilmis veri dosyasi .xlsx olarak indirildi.");
     } catch {
@@ -1148,7 +1266,7 @@ export default function PdksPage() {
       return;
     }
     const sb = getSupabaseClient();
-    const missingPersoneller = seciliYeniMazeretHucreler.filter((x) => !personelIdByNorm[normalizeText(x.personel)]);
+    const missingPersoneller = seciliYeniMazeretHucreler.filter((x) => !pickEmploymentRange(employmentRanges[normalizeText(x.personel)], x.tarih)?.id);
     if (missingPersoneller.length > 0) {
       setError(`Personel kaydi bulunamayan hucreler var: ${missingPersoneller.map((x) => x.personel).join(", ")}`);
       return;
@@ -1164,7 +1282,7 @@ export default function PdksPage() {
     const payloads = seciliYeniMazeretHucreler.map((x) => {
       const gun = x.tip === "half" ? 0.5 : 1;
       return {
-        personel_id: personelIdByNorm[normalizeText(x.personel)],
+        personel_id: pickEmploymentRange(employmentRanges[normalizeText(x.personel)], x.tarih)!.id,
         izin_tipi: kartIzinTipi,
         baslangic: x.tarih,
         bitis: x.tarih,
@@ -1258,12 +1376,20 @@ export default function PdksPage() {
           <div className="mt-4 grid gap-4 md:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ham PDKS Dosyasi</p>
-              <input className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm" type="file" accept=".csv,.xls,.xlsx" onChange={(e) => {
-                setPdksFile(e.target.files?.[0] ?? null);
-                setImportedRawMovements([]);
-                setAllMovements([]);
-                setManualMovements([]);
-              }} />
+              <input
+                ref={pdksFileInputRef}
+                className="mt-3 w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"
+                type="file"
+                accept=".csv,.xls,.xlsx"
+                onClick={(e) => {
+                  if (!getOpenFilePicker(window)) return;
+                  e.preventDefault();
+                  void pickPdksFileFromDisk();
+                }}
+                onChange={(e) => {
+                  void applyPdksFile(e.target.files?.[0] ?? null, null);
+                }}
+              />
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Idari Izin Dosyasi</p>
@@ -1538,8 +1664,9 @@ export default function PdksPage() {
                         <div className="truncate text-xs font-medium leading-tight" title={p}>{p}</div>
                       </td>
                       {takvimGunleri.map((iso) => {
-                        const er = employmentRanges[normalizeText(p)];
-                        const calismaDisi = !!er && ((er.ise ? iso < er.ise : false) || (er.ayrilis ? iso > er.ayrilis : false));
+                        const ranges = employmentRanges[normalizeText(p)];
+                        const covering = pickEmploymentRange(ranges, iso);
+                        const calismaDisi = !!ranges?.length && !covering;
                         const row = dailyByPersonDay.get(`${normalizeText(p)}__${iso}`);
                         const leaveDurum = leaveDayStatusMap[`${normalizeText(p)}__${iso}`] || "";
                         const holidayDurum = holidayDayTypeMap[iso] === "full" ? "resmi tatil" : holidayDayTypeMap[iso] === "half" ? "arefe" : "";
