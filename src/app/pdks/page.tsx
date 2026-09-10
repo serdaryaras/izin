@@ -48,14 +48,24 @@ const FULL_LUNCH_MIN = 60;
 const WEEKEND_LUNCH_ZERO_MAX_MIN = 4 * 60 + 15;
 const WEEKEND_LUNCH_HALF_MAX_MIN = 8 * 60;
 
-function normalizeText(value: unknown): string {
+function canonicalPersonelName(value: unknown): string {
   if (value == null) return "";
   return String(value)
-    .trim()
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function normalizeText(value: unknown): string {
+  if (value == null) return "";
+  return canonicalPersonelName(value)
+    // Turkce I/İ toLowerCase oncesi donusturulmeli; aksi halde "İ" -> "i̇" (noktali i) olup eslesme kirilir.
+    .replace(/İ/g, "i")
+    .replace(/I/g, "i")
     .toLowerCase()
     .replace(/[çÇ]/g, "c")
     .replace(/[ğĞ]/g, "g")
-    .replace(/[ıİ]/g, "i")
+    .replace(/[ı]/g, "i")
     .replace(/[öÖ]/g, "o")
     .replace(/[şŞ]/g, "s")
     .replace(/[üÜ]/g, "u");
@@ -319,7 +329,7 @@ export default function PdksPage() {
 
           for (let i = headerIdx + 1; i < rows.length; i++) {
             const row = rows[i];
-            const p = String(row[personel] ?? "").trim();
+            const p = canonicalPersonelName(row[personel]);
             const d = excelDateToJS(XLSX, row[tarih]);
             const t = excelDateToJS(XLSX, row[saat]);
             const rawDurum = normalizeText(row[durum]);
@@ -415,7 +425,7 @@ export default function PdksPage() {
         const key = normalizeText(m.personel);
         if (!byPerson.has(key)) {
           byPerson.set(key, {
-            display: m.personel.trim().replace(/\s+/g, " "),
+            display: canonicalPersonelName(m.personel),
             list: [],
           });
         }
@@ -773,7 +783,7 @@ export default function PdksPage() {
   }
 
   function addManualMovementFromValues(personelRaw: string, tarih: string, saat: string, durum: "G" | "C"): boolean {
-    const personel = personelRaw.trim();
+    const personel = canonicalPersonelName(personelRaw);
     if (!personel) {
       setError("Manuel hareket icin personel gerekli.");
       return false;
@@ -980,20 +990,23 @@ export default function PdksPage() {
     return [...map.values()].sort((a, b) => (a.personel === b.personel ? a.tarih.localeCompare(b.tarih) : a.personel.localeCompare(b.personel, "tr")));
   }, [unmatchedRows]);
   const selectedFormDayMovements = useMemo(() => {
-    const personel = manualForm.personel.trim();
-    const tarih = manualForm.tarih;
+    const personel = canonicalPersonelName(manualForm.personel);
+    const tarih = String(manualForm.tarih || "").trim();
     if (!personel || !tarih) return [];
+    const personelKey = normalizeText(personel);
     return allMovements
-      .filter((m) => normalizeText(m.personel) === normalizeText(personel) && fmtDateKey(m.datetime) === tarih)
+      .filter((m) => normalizeText(m.personel) === personelKey && fmtDateKey(m.datetime) === tarih)
       .sort((a, b) => a.datetime.getTime() - b.datetime.getTime());
   }, [allMovements, manualForm.personel, manualForm.tarih]);
   const personelSecenekleri = useMemo(() => {
-    const set = new Set<string>();
+    const byNorm = new Map<string, string>();
     allMovements.forEach((m) => {
-      const ad = m.personel.trim();
-      if (ad) set.add(ad);
+      const ad = canonicalPersonelName(m.personel);
+      if (!ad) return;
+      const key = normalizeText(ad);
+      if (!byNorm.has(key)) byNorm.set(key, ad);
     });
-    return [...set].sort((a, b) => a.localeCompare(b, "tr"));
+    return [...byNorm.values()].sort((a, b) => a.localeCompare(b, "tr"));
   }, [allMovements]);
   const monthOptions = useMemo(() => {
     const set = new Set<string>();
@@ -1070,6 +1083,13 @@ export default function PdksPage() {
     if (netMin > 0 && netMin <= HALF_DAY_TARGET_MIN) return "half";
     if (brutMin > 0 && brutMin <= HALF_DAY_TARGET_MIN) return "half";
     return null;
+  }
+  function inspectPersonelGun(personel: string, iso: string) {
+    setManualForm((prev) => ({
+      ...prev,
+      personel: canonicalPersonelName(personel),
+      tarih: iso,
+    }));
   }
   function toggleMazeretCell(personel: string, iso: string, tip: "full" | "half" | null) {
     if (!tip) return;
@@ -1442,9 +1462,12 @@ export default function PdksPage() {
                                 : hareketYokCalismaGunu
                                   ? "bg-red-300"
                                   : cellBg
-                            } ${seciliMazeretHucre ? "ring-2 ring-inset ring-sky-500" : ""} ${secilebilirHucre ? "cursor-pointer ring-1 ring-inset ring-sky-200" : ""}`}
-                            title={secilebilirHucre ? "Mazeret eklemek icin tiklayin" : (hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : (cellDurum || ""))}
-                            onClick={() => toggleMazeretCell(p, iso, mazeretAdayTip)}
+                            } ${seciliMazeretHucre ? "ring-2 ring-inset ring-sky-500" : ""} ${secilebilirHucre ? "ring-1 ring-inset ring-sky-200" : ""} cursor-pointer`}
+                            title={secilebilirHucre ? "Tiklayinca gun hareketleri acilir; mazeret icin uygunsa secilir" : (hareketYokCalismaGunu ? "PDKS hareketi yok (calisilmasi gereken gun)" : "Bu gunun giris-cikis hareketlerini goster")}
+                            onClick={() => {
+                              inspectPersonelGun(p, iso);
+                              toggleMazeretCell(p, iso, mazeretAdayTip);
+                            }}
                             onMouseDown={(e) => {
                               if (!mazeretAdayTip) return;
                               e.preventDefault();
