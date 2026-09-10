@@ -2917,15 +2917,17 @@ export default function Home() {
         </section>
 
         <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-1 text-lg font-semibold">Personel</h2>
-          <p className="mb-4 text-sm text-slate-500">
-            Ayrilip geri donen personel icin eski kaydi guncellemeyin. Ayni adla Ekle deyince yeni ID olusur; izin hakki yeni ise giris tarihinden baslar, eski izinler karismaz.
-          </p>
-          <div className={formGridClass}>
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <label className={labelClass}>Personel listesi</label>
+              <h2 className="text-lg font-semibold">Personel</h2>
+              <p className="text-sm text-slate-500">
+                Ayrilip geri donen personel icin eski kaydi guncellemeyin. Ayni adla Ekle deyince yeni ID olusur; izin hakki yeni ise giris tarihinden baslar, eski izinler karismaz.
+              </p>
+            </div>
+            <div>
+              <span className={labelClass}>Personel listesi</span>
               <select
-                className={fieldClass}
+                className={`${fieldClass} min-w-[160px]`}
                 value={personelKartKaynak}
                 onChange={(e) => setPersonelKartKaynak(e.target.value as "aktif" | "tumu")}
               >
@@ -2933,6 +2935,8 @@ export default function Home() {
                 <option value="tumu">Tum personeller</option>
               </select>
             </div>
+          </div>
+          <div className={formGridClass}>
             <div>
               <label className={labelClass}>Secili Personel</label>
               <select
