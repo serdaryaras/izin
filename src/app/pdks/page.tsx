@@ -1560,8 +1560,8 @@ export default function PdksPage() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" ref={aylikBakiyeKartRef}>
           <h2 className="text-lg font-semibold tracking-tight">Aylik Mesai Bakiye Karti</h2>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2">
+          <div className="mt-3 flex flex-nowrap items-center gap-1.5 overflow-x-auto">
+            <div className="flex shrink-0 items-center gap-1.5">
               <span className="text-xs text-slate-500">Ay:</span>
               <select
                 className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
@@ -1572,21 +1572,21 @@ export default function PdksPage() {
               </select>
             </div>
             <button
-              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void exportAylikBakiyeKart("png")}
               disabled={!takvimAy || takvimPersoneller.length === 0 || takvimGunleri.length === 0}
             >
               PNG Cikti
             </button>
             <button
-              className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void exportAylikBakiyeKart("pdf")}
               disabled={!takvimAy || takvimPersoneller.length === 0 || takvimGunleri.length === 0}
             >
               PDF Cikti
             </button>
             <select
-              className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+              className="shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
               value={kartIzinTipi}
               onChange={(e) => setKartIzinTipi(e.target.value)}
             >
@@ -1596,31 +1596,31 @@ export default function PdksPage() {
               {izinTipiSecenekleri.map((t) => <option key={`kart-izin-${t.kod}`} value={t.kod}>{t.ad}</option>)}
             </select>
             <input
-              className="w-52 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+              className="w-36 min-w-24 shrink rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
               placeholder="Aciklama (opsiyonel)"
               value={kartIzinAciklama}
               onChange={(e) => setKartIzinAciklama(e.target.value)}
             />
             <button
-              className="rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-sky-300 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void saveSelectedMazeretFromCard()}
               disabled={kartKaydediliyor || seciliYeniMazeretHucreler.length === 0}
             >
-              {kartKaydediliyor ? "Kaydediliyor..." : `Secili Hucrelere Mazeret Kaydet (${seciliYeniMazeretHucreler.length})`}
+              {kartKaydediliyor ? "Kaydediliyor..." : `Hucrelere Mazeret Kaydet (${seciliYeniMazeretHucreler.length})`}
             </button>
             <button
-              className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void updateSelectedMazeretFromCard()}
               disabled={kartKaydediliyor || seciliKayitliMazeretHucreler.length === 0}
             >
-              {kartKaydediliyor ? "Guncelleniyor..." : `Secili Kayitlari Guncelle (${seciliKayitliMazeretHucreler.length})`}
+              {kartKaydediliyor ? "Guncelleniyor..." : `Kayitlari Guncelle (${seciliKayitliMazeretHucreler.length})`}
             </button>
             <button
-              className="rounded-lg border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 whitespace-nowrap rounded-lg border border-rose-300 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
               onClick={() => void deleteSelectedMazeretFromCard()}
               disabled={kartKaydediliyor || seciliKayitliMazeretHucreler.length === 0}
             >
-              {kartKaydediliyor ? "Siliniyor..." : `Secili Kayitlari Sil (${seciliKayitliMazeretHucreler.length})`}
+              {kartKaydediliyor ? "Siliniyor..." : `Kayitlari Sil (${seciliKayitliMazeretHucreler.length})`}
             </button>
           </div>
           <p className="mt-2 text-[11px] text-slate-500">
