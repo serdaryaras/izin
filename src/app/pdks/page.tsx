@@ -38,7 +38,9 @@ type MovementRow = {
 };
 type EmploymentRange = { id: string; ise: string | null; ayrilis: string | null };
 type IzinTuruOption = Pick<Tables<"izin_turleri">, "kod" | "ad">;
-type SelectedMazeretCell = { personel: string; tarih: string; tip: "full" | "half"; izinId?: string };
+type MazeretGunTipi = "full" | "half" | "quarter";
+type KartIzinGunModu = "otomatik" | "tam" | "yarim" | "ceyrek";
+type SelectedMazeretCell = { personel: string; tarih: string; tip: MazeretGunTipi; izinId?: string };
 type LeaveDayRecord = {
   id: string;
   izin_tipi: string;
@@ -50,6 +52,7 @@ type LeaveDayRecord = {
 
 const DAILY_TARGET_MIN = 8 * 60 + 30;
 const HALF_DAY_TARGET_MIN = DAILY_TARGET_MIN / 2;
+const QUARTER_REMAINING_MIN = Math.round((DAILY_TARGET_MIN * 3) / 4);
 const LUNCH_START_MIN = 11 * 60;
 const LUNCH_END_MIN = 14 * 60 + 30;
 const FULL_LUNCH_MIN = 60;
@@ -220,9 +223,45 @@ function isYarimIzinDurumu(durumRaw: string): boolean {
   if (!d) return false;
   return d.includes("yarim") || d.includes("1/2");
 }
+function isCeyrekIzinDurumu(durumRaw: string): boolean {
+  const d = normalizeText(durumRaw);
+  if (!d) return false;
+  return d.includes("ceyrek") || d.includes("1/4") || d.includes("dortte");
+}
+function leaveDurumFromRecord(izinTipi: string, baslangic: string, bitis: string, gunDegeri: number): string {
+  if (baslangic !== bitis) return izinTipi;
+  if (gunDegeri > 0 && gunDegeri <= 0.3) return `${izinTipi} ceyrek`;
+  if (gunDegeri > 0 && gunDegeri < 1) return `${izinTipi} yarim`;
+  return izinTipi;
+}
+function tipFromLeaveGun(baslangic: string, bitis: string, gun: number): MazeretGunTipi {
+  if (baslangic === bitis && gun > 0 && gun <= 0.3) return "quarter";
+  if (baslangic === bitis && gun > 0 && gun < 1) return "half";
+  return "full";
+}
+function kartGunModuFromLeave(baslangic: string, bitis: string, gun: number): KartIzinGunModu {
+  const tip = tipFromLeaveGun(baslangic, bitis, gun);
+  if (tip === "quarter") return "ceyrek";
+  if (tip === "half") return "yarim";
+  return "tam";
+}
+function explicitGunFromMod(mod: KartIzinGunModu): number | null {
+  if (mod === "ceyrek") return 0.25;
+  if (mod === "yarim") return 0.5;
+  if (mod === "tam") return 1;
+  return null;
+}
+function resolveKayitGun(cellTip: MazeretGunTipi, mod: KartIzinGunModu): number {
+  const explicit = explicitGunFromMod(mod);
+  if (explicit != null) return explicit;
+  if (cellTip === "quarter") return 0.25;
+  if (cellTip === "half") return 0.5;
+  return 1;
+}
 function getLeaveBadgeLabel(leaveCode: string, durumRaw: string, holidayType?: "full" | "half"): string {
   if (!leaveCode) return "";
-  if (leaveCode === "Y" && (holidayType === "half" || isYarimIzinDurumu(durumRaw))) return "Y(1/2)";
+  if (isCeyrekIzinDurumu(durumRaw)) return `${leaveCode}1/4`;
+  if (isYarimIzinDurumu(durumRaw) || (leaveCode === "Y" && holidayType === "half")) return `${leaveCode}1/2`;
   return leaveCode;
 }
 
@@ -267,6 +306,13 @@ function excelDateToJS(XLSX: any, value: unknown): Date | null | { timeOnly: tru
     if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
   }
   return null;
+}
+
+function workbookToXlsxBytes(out: ArrayBuffer | Uint8Array): ArrayBuffer {
+  const view = out instanceof Uint8Array ? out : new Uint8Array(out);
+  const copy = new ArrayBuffer(view.byteLength);
+  new Uint8Array(copy).set(view);
+  return copy;
 }
 
 function splitCsv(text: string, delimiter = ","): string[][] {
@@ -350,6 +396,7 @@ export default function PdksPage() {
   const [holidayDayTypeMap, setHolidayDayTypeMap] = useState<Record<string, "full" | "half">>({});
   const [izinTurleri, setIzinTurleri] = useState<IzinTuruOption[]>([]);
   const [kartIzinTipi, setKartIzinTipi] = useState("yillik");
+  const [kartIzinGun, setKartIzinGun] = useState<KartIzinGunModu>("otomatik");
   const [kartIzinAciklama, setKartIzinAciklama] = useState("");
   const [selectedMazeretCells, setSelectedMazeretCells] = useState<Record<string, SelectedMazeretCell>>({});
   const [kartKaydediliyor, setKartKaydediliyor] = useState(false);
@@ -584,8 +631,7 @@ export default function PdksPage() {
             const from = new Date(i.baslangic + "T00:00:00");
             const to = new Date(i.bitis + "T00:00:00");
             const gunDegeri = i.gun ?? i.gun_sayisi ?? 1;
-            const yarimGunKaydi = i.baslangic === i.bitis && gunDegeri <= 0.5;
-            const durumDegeri = yarimGunKaydi ? `${i.izin_tipi} yarim` : i.izin_tipi;
+            const durumDegeri = leaveDurumFromRecord(i.izin_tipi, i.baslangic, i.bitis, gunDegeri);
             const rec: LeaveDayRecord = {
               id: i.id,
               izin_tipi: i.izin_tipi,
@@ -775,7 +821,12 @@ export default function PdksPage() {
             const mazeret = normalizeText(mazeretRaw);
             // Izinler tablosunda kaydi olan tum mazeret/izin gunlerinde beklenen calisma sifirlanir.
             if (mazeret) {
-              expected = isYarimIzinDurumu(mazeretRaw) ? HALF_DAY_TARGET_MIN : 0;
+              const kalan = isCeyrekIzinDurumu(mazeretRaw)
+                ? QUARTER_REMAINING_MIN
+                : isYarimIzinDurumu(mazeretRaw)
+                  ? HALF_DAY_TARGET_MIN
+                  : 0;
+              expected = Math.min(expected, kalan);
               gunDurumu = mazeretRaw || gunDurumu;
             }
           }
@@ -1090,15 +1141,9 @@ export default function PdksPage() {
               },
             ],
           });
-          const bytes = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
-          const payload = new ArrayBuffer(bytes.byteLength);
-          new Uint8Array(payload).set(bytes);
+          const bytes = workbookToXlsxBytes(XLSX.write(wb, { bookType: "xlsx", type: "array" }));
           const writable = await handle.createWritable();
-          await writable.write(
-            new Blob([payload], {
-              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            }),
-          );
+          await writable.write(bytes);
           await writable.close();
           setError("");
           setNotice(`Duzeltilmis veri dosyasi kaydedildi: ${handle.name}`);
@@ -1226,18 +1271,30 @@ export default function PdksPage() {
     if (kartIzinTipi) return;
     setKartIzinTipi(izinTipiSecenekleri[0]?.kod ?? "yillik");
   }, [izinTipiSecenekleri, kartIzinTipi]);
-  function getMazeretAdayTip(row: DailyRow | undefined, leaveCode: string, iso: string): "full" | "half" | null {
+  function getMazeretAdayTip(row: DailyRow | undefined, leaveCode: string, iso: string, mod: KartIzinGunModu): MazeretGunTipi | null {
     if (!row || leaveCode) return null;
     const day = new Date(`${iso}T00:00:00`);
     const cumartesi = isSaturday(day);
     const beklenenMin = hhmmToMinutes(row.beklenen);
     const brutMin = hhmmToMinutes(row.brut);
+    const netMin = hhmmToMinutes(row.net);
+    const calisma = netMin > 0 ? netMin : brutMin;
     // Cumartesi icin de karttan mazeret/izin kaydi acilsin.
     if (!cumartesi && beklenenMin <= 0) return null;
+    if (mod === "ceyrek") {
+      if (brutMin <= 0 || calisma <= QUARTER_REMAINING_MIN) return "quarter";
+      return null;
+    }
+    if (mod === "yarim") {
+      if (brutMin <= 0 || calisma <= HALF_DAY_TARGET_MIN) return "half";
+      return null;
+    }
+    if (mod === "tam") {
+      if (brutMin <= 0 || calisma <= HALF_DAY_TARGET_MIN) return "full";
+      return null;
+    }
     if (brutMin <= 0) return "full";
-    const netMin = hhmmToMinutes(row.net);
-    if (netMin > 0 && netMin <= HALF_DAY_TARGET_MIN) return "half";
-    if (brutMin > 0 && brutMin <= HALF_DAY_TARGET_MIN) return "half";
+    if (calisma <= HALF_DAY_TARGET_MIN) return "half";
     return null;
   }
   function inspectPersonelGun(personel: string, iso: string) {
@@ -1247,7 +1304,7 @@ export default function PdksPage() {
       tarih: iso,
     }));
   }
-  function toggleMazeretCell(personel: string, iso: string, tip: "full" | "half" | null, izinId?: string) {
+  function toggleMazeretCell(personel: string, iso: string, tip: MazeretGunTipi | null, izinId?: string) {
     if (!tip && !izinId) return;
     const key = `${normalizeText(personel)}__${iso}`;
     setSelectedMazeretCells((prev) => {
@@ -1286,7 +1343,7 @@ export default function PdksPage() {
     setError("");
     setNotice("");
     const payloads = seciliYeniMazeretHucreler.map((x) => {
-      const gun = x.tip === "half" ? 0.5 : 1;
+      const gun = resolveKayitGun(x.tip, kartIzinGun);
       return {
         personel_id: pickEmploymentRange(employmentRanges[normalizeText(x.personel)], x.tarih)!.id,
         izin_tipi: kartIzinTipi,
@@ -1325,19 +1382,39 @@ export default function PdksPage() {
     setKartKaydediliyor(true);
     setError("");
     setNotice("");
+    const aciklama = kartIzinAciklama.trim() || null;
+    const gun = explicitGunFromMod(kartIzinGun);
+    const tekGunIds = gun == null
+      ? []
+      : [...new Set(
+          seciliKayitliMazeretHucreler
+            .map((x) => leaveRecordByKey[`${normalizeText(x.personel)}__${x.tarih}`])
+            .filter((rec): rec is LeaveDayRecord => !!rec && rec.baslangic === rec.bitis)
+            .map((rec) => rec.id),
+        )];
+    const aralikVar = gun != null && tekGunIds.length < ids.length;
     const { error: updateError } = await sb
       .from("izinler")
       .update({
         izin_tipi: kartIzinTipi,
-        aciklama: kartIzinAciklama.trim() || null,
+        aciklama,
       })
       .in("id", ids);
+    let gunError: { message: string } | null = null;
+    if (!updateError && tekGunIds.length > 0 && gun != null) {
+      const gunUpdate = await sb
+        .from("izinler")
+        .update({ gun_sayisi: gun, gun })
+        .in("id", tekGunIds);
+      gunError = gunUpdate.error;
+    }
     setKartKaydediliyor(false);
-    if (updateError) {
-      setError(updateError.message);
+    if (updateError || gunError) {
+      setError((updateError ?? gunError)!.message);
       return;
     }
-    setNotice(`${ids.length} mazeret kaydi guncellendi.`);
+    const gunNotu = aralikVar ? " Cok gunlu kayitlarin gun sayisi degismedi." : "";
+    setNotice(`${ids.length} mazeret kaydi guncellendi.${gunNotu}`);
     setSelectedMazeretCells({});
     await processAll();
   }
@@ -1595,6 +1672,17 @@ export default function PdksPage() {
               ) : null}
               {izinTipiSecenekleri.map((t) => <option key={`kart-izin-${t.kod}`} value={t.kod}>{t.ad}</option>)}
             </select>
+            <select
+              className="shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+              value={kartIzinGun}
+              onChange={(e) => setKartIzinGun(e.target.value as KartIzinGunModu)}
+              title="Kaydedilecek izin suresi"
+            >
+              <option value="otomatik">Gun: otomatik</option>
+              <option value="tam">Tam gun</option>
+              <option value="yarim">Y1/2 yarim gun</option>
+              <option value="ceyrek">Y1/4 ceyrek gun</option>
+            </select>
             <input
               className="w-36 min-w-24 shrink rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
               placeholder="Aciklama (opsiyonel)"
@@ -1624,7 +1712,7 @@ export default function PdksPage() {
             </button>
           </div>
           <p className="mt-2 text-[11px] text-slate-500">
-            Mavi ince cerceveli hucreler yeni mazeret icin secilebilir. Rozetli (Y, D, ...) kayitlara tiklayarak silme veya tur/aciklama guncelleme yapabilirsiniz. Kural: hic gelinmeyen veya net/brut calisma suresi 04:30 ve alti olan gunler (Cumartesi dahil).
+            Mavi ince cerceveli hucreler yeni mazeret icin secilebilir. Rozetli (Y, Y1/2, Y1/4, D, ...) kayitlara tiklayarak silme veya tur/sure/aciklama guncelleme yapabilirsiniz. Otomatik: hic gelinmeyen gun tam, net/brut calisma suresi 04:30 ve alti yarim gun. Y1/2 ve Y1/4 ile kismi izin de yazilir (Cumartesi dahil).
           </p>
           <div className="mt-3 overflow-hidden rounded-xl ring-[0.5px] ring-slate-400">
             <div className="overflow-auto" data-aylik-bakiye-table-wrap>
@@ -1690,7 +1778,7 @@ export default function PdksPage() {
                         const displayLeaveCode = getLeaveBadgeLabel(leaveCode, cellDurum, holidayType);
                         const secimKey = `${normalizeText(p)}__${iso}`;
                         const leaveRec = leaveRecordByKey[secimKey];
-                        const mazeretAdayTip = getMazeretAdayTip(row, leaveCode, iso);
+                        const mazeretAdayTip = getMazeretAdayTip(row, leaveCode, iso, kartIzinGun);
                         const seciliMazeretHucre = !!selectedMazeretCells[secimKey];
                         const secilebilirHucre = !!mazeretAdayTip || !!leaveRec;
                         const beklenenMin = row ? hhmmToMinutes(row.beklenen) : 0;
@@ -1720,11 +1808,12 @@ export default function PdksPage() {
                               inspectPersonelGun(p, iso);
                               if (leaveRec) {
                                 const already = !!selectedMazeretCells[secimKey];
-                                const tip: "full" | "half" = leaveRec.baslangic === leaveRec.bitis && leaveRec.gun <= 0.5 ? "half" : "full";
+                                const tip = tipFromLeaveGun(leaveRec.baslangic, leaveRec.bitis, leaveRec.gun);
                                 toggleMazeretCell(p, iso, tip, leaveRec.id);
                                 if (!already) {
                                   setKartIzinTipi(leaveRec.izin_tipi);
                                   setKartIzinAciklama(leaveRec.aciklama ?? "");
+                                  setKartIzinGun(kartGunModuFromLeave(leaveRec.baslangic, leaveRec.bitis, leaveRec.gun));
                                 }
                                 return;
                               }
@@ -1736,7 +1825,7 @@ export default function PdksPage() {
                             }}
                           >
                             {leaveCode ? (
-                              <span className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm text-[10px] font-bold leading-none tracking-tight ${getTakvimGunGolgeClass(cellDurum)}`}>
+                              <span className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm font-bold leading-none tracking-tight ${displayLeaveCode.includes("1/") ? "px-0.5 text-[8px]" : "text-[10px]"} ${getTakvimGunGolgeClass(cellDurum)}`}>
                                 {displayLeaveCode}
                               </span>
                             ) : (

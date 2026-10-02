@@ -494,13 +494,13 @@ function izinGunlukYuk(
   return 1;
 }
 
-/** Aylik takvim hucresi: yillik yarim gun Y1/2, diger turlerde yarim gun ise kisaltma + 1/2. */
+/** Aylik takvim hucresi: 0,25 gun Y1/4, 0,5 gun Y1/2; diger turlerde kisaltma + kesir. */
 function aylikTakvimRozetMetni(izin: Izin, dayIso: string, tatilMap: Map<string, string>): string {
   const yuk = izinGunlukYuk(izin, dayIso, tatilMap);
-  const yarimGun = yuk > 0 && yuk < 1;
-  if (yarimGun && izin.izin_tipi === "yillik") return "Y1/2";
-  if (yarimGun) return `${izinKisaltma[izin.izin_tipi]}1/2`;
-  return izinKisaltma[izin.izin_tipi];
+  const kisaltma = izinKisaltma[izin.izin_tipi];
+  if (yuk > 0 && yuk <= 0.3) return `${kisaltma}1/4`;
+  if (yuk > 0 && yuk < 1) return `${kisaltma}1/2`;
+  return kisaltma;
 }
 
 function shouldShowOnDay(
@@ -2708,6 +2708,12 @@ export default function Home() {
                 </span>
                 Yillik izin (yarim gun)
               </span>
+              <span className="inline-flex max-w-[11rem] min-w-0 items-center justify-center gap-1 rounded-full bg-sky-50 px-2.5 py-1.5 text-center text-[11px] font-medium leading-snug text-slate-800">
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${izinRenk.yillik}`}>
+                  Y1/4
+                </span>
+                Yillik izin (ceyrek gun)
+              </span>
               <span className="inline-flex max-w-[11rem] items-center justify-center rounded-full bg-rose-100 px-2.5 py-1.5 text-center text-[11px] font-medium leading-snug text-slate-800">
                 Pazar
               </span>
@@ -2803,7 +2809,7 @@ export default function Home() {
                           {izin && !gizleIzin ? (
                             <span
                               className={`box-border flex h-6 w-full min-w-0 items-center justify-center rounded-sm font-bold leading-none tracking-tight ${izinRenk[izin.izin_tipi]} ${
-                                rozetMetni === "Y1/2" ? "px-0.5 text-[8px]" : "text-[10px]"
+                                rozetMetni.includes("1/") ? "px-0.5 text-[8px]" : "text-[10px]"
                               }`}
                               title={`${izin.izin_tipi} (${isoToDdMmYyyy(izin.baslangic)} - ${isoToDdMmYyyy(izin.bitis)})`}
                             >
