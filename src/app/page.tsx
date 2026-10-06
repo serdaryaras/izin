@@ -659,6 +659,41 @@ function indirCanvasPng(canvas: HTMLCanvasElement, dosyaAdi: string) {
   a.click();
 }
 
+function canvasDilimleriniPdfEkle(
+  pdf: {
+    addPage: () => void;
+    addImage: (data: string, format: string, x: number, y: number, w: number, h: number) => void;
+    internal: { pageSize: { getWidth: () => number; getHeight: () => number } };
+  },
+  canvas: HTMLCanvasElement,
+  ilkSayfa: boolean,
+) {
+  const margin = 10;
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const maxW = pageW - margin * 2;
+  const maxH = pageH - margin * 2;
+  const mmPerPx = maxW / canvas.width;
+  const dilimPx = Math.max(1, Math.floor(maxH / mmPerPx));
+  let offset = 0;
+  let sayfa = 0;
+  while (offset < canvas.height) {
+    if (!(ilkSayfa && sayfa === 0)) pdf.addPage();
+    const yukseklik = Math.min(dilimPx, canvas.height - offset);
+    const dilim = document.createElement("canvas");
+    dilim.width = canvas.width;
+    dilim.height = yukseklik;
+    const ctx = dilim.getContext("2d");
+    if (!ctx) throw new Error("PDF dilimi olusturulamadi.");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, dilim.width, dilim.height);
+    ctx.drawImage(canvas, 0, offset, canvas.width, yukseklik, 0, 0, canvas.width, yukseklik);
+    pdf.addImage(dilim.toDataURL("image/png"), "PNG", margin, margin, maxW, yukseklik * mmPerPx);
+    offset += yukseklik;
+    sayfa += 1;
+  }
+}
+
 async function indirTakvimPdf(canvas: HTMLCanvasElement, dosyaAdi: string) {
   const { default: jsPDF } = await import("jspdf");
   const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -1689,6 +1724,9 @@ export default function Home() {
         }
 
         const toplamGun = entries.reduce((s, e) => s + e.gun, 0);
+        const kalanIzinGun =
+          cumulativeAnnualEntitlementThroughDate(p, raporSonDate) -
+          cumulativeAnnualUsedThroughDate(p, raporSonDate, izinler, tatilMap);
         return {
           personel: p,
           iktisapIso: p.ise_giris,
@@ -1696,114 +1734,32 @@ export default function Home() {
           raporSonIso,
           donemAdedi,
           toplamGun,
+          kalanIzinGun,
           entries,
         };
       })
       .filter((r): r is NonNullable<typeof r> => !!r && r.entries.length > 0);
   }, [yillikFormSonXDonem, personeller, izinler, tatilMap, izinTurleri]);
 
-  async function yillikFormIndirWord() {
-    if (yillikFormSayfalari.length === 0) return;
+  async function yillikFormIndirPdf() {
+    const root = yillikFormRef.current;
+    if (!root || yillikFormSayfalari.length === 0) return;
     setYillikFormDisariAktariliyor(true);
     setError("");
     try {
-      const {
-        AlignmentType,
-        BorderStyle,
-        Document,
-        HeadingLevel,
-        Packer,
-        Paragraph,
-        Table,
-        TableCell,
-        TableRow,
-        TextRun,
-        WidthType,
-      } = await import("docx");
-
-      const sections = yillikFormSayfalari.map((r) => {
-        const rows = [
-          new TableRow({
-            children: [
-              new TableCell({ children: [new Paragraph({ text: "Kidem yili" })] }),
-              new TableCell({ children: [new Paragraph({ text: "Mazeret Turu" })] }),
-              new TableCell({ children: [new Paragraph({ text: "Baslangic" })] }),
-              new TableCell({ children: [new Paragraph({ text: "Son Gun" })] }),
-              new TableCell({ children: [new Paragraph({ text: "Gun" })] }),
-              new TableCell({ children: [new Paragraph({ text: "Yol Izni" })] }),
-            ],
-          }),
-        ];
-        r.entries.forEach((e) => {
-          rows.push(
-            new TableRow({
-              children: [
-                new TableCell({ children: [new Paragraph(e.donemEtiket)] }),
-                new TableCell({ children: [new Paragraph(e.tur)] }),
-                new TableCell({ children: [new Paragraph(isoToDdMmYyyy(e.basIso))] }),
-                new TableCell({ children: [new Paragraph(isoToDdMmYyyy(e.bitIso))] }),
-                new TableCell({ children: [new Paragraph(formatGunDegeri(e.gun))] }),
-                new TableCell({ children: [new Paragraph("-")] }),
-              ],
-            }),
-          );
-        });
-
-        const pageChildren: Array<InstanceType<typeof Paragraph> | InstanceType<typeof Table>> = [
-          new Paragraph({
-            text: `YILLIK UCRETLI IZIN FORMU - SON ${r.donemAdedi} DONEM`,
-            heading: HeadingLevel.HEADING_2,
-            alignment: AlignmentType.CENTER,
-          }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: `Çalışan: ${personelGorunenAd(r.personel, personeller)}   `, bold: true }),
-              new TextRun({ text: `Iktisap Tarihi: ${isoToDdMmYyyy(r.iktisapIso)}   ` }),
-              new TextRun({
-                text: `Rapor Araligi: ${isoToDdMmYyyy(r.raporBasIso)} - ${isoToDdMmYyyy(r.raporSonIso)}   `,
-              }),
-              new TextRun({ text: `Toplam Gun: ${formatGunDegeri(r.toplamGun)}` }),
-            ],
-          }),
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows,
-          }),
-          new Paragraph({ text: "" }),
-          new Paragraph({ children: [new TextRun({ text: "Imza", bold: true })] }),
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({
-                    children: [new Paragraph(" ")],
-                    borders: {
-                      top: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
-                      bottom: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
-                      left: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
-                      right: { style: BorderStyle.SINGLE, size: 6, color: "94a3b8" },
-                    },
-                  }),
-                ],
-                height: { value: 2200, rule: "atLeast" },
-              }),
-            ],
-          }),
-        ];
-        return { children: pageChildren };
-      });
-
-      const doc = new Document({ sections });
-      const blob = await Packer.toBlob(doc);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${yillikFormDosyaAdiKoku}.docx`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const kartlar = [...root.querySelectorAll("[data-yillik-form-sayfa]")].filter(
+        (el): el is HTMLElement => el instanceof HTMLElement,
+      );
+      if (kartlar.length === 0) throw new Error("Form goruntusu bulunamadi.");
+      const { default: jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      for (let i = 0; i < kartlar.length; i++) {
+        const canvas = await captureTakvimElement(kartlar[i]);
+        canvasDilimleriniPdfEkle(pdf, canvas, i === 0);
+      }
+      pdf.save(`${yillikFormDosyaAdiKoku}.pdf`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Yillik form DOCX olusturulamadi.");
+      setError(err instanceof Error ? err.message : "Yillik form PDF olusturulamadi.");
     } finally {
       setYillikFormDisariAktariliyor(false);
     }
@@ -2208,6 +2164,13 @@ export default function Home() {
                         </span>
                       );
                     })}
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-800"
+                      title="Resmi tatil (RT)"
+                    >
+                      <span className="rounded bg-white/70 px-1">RT</span>
+                      Resmi tatil
+                    </span>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <label className="text-[11px] font-semibold text-slate-600">Yil</label>
@@ -2345,7 +2308,9 @@ export default function Home() {
                                               })`
                                             : mevcutGoster
                                               ? `${isoToDdMmYyyy(iso)} — Mazeret: ${mevcutTurAdi}`
-                                              : `${isoToDdMmYyyy(iso)} — Tikla`
+                                              : resmi
+                                                ? `${isoToDdMmYyyy(iso)} — Resmi tatil`
+                                                : `${isoToDdMmYyyy(iso)} — Tikla`
                                       }
                                     >
                                       <span className="text-[9px] font-medium leading-none">
@@ -2358,6 +2323,10 @@ export default function Home() {
                                       ) : buAy && mevcutGoster && mevcut ? (
                                         <span className="max-w-full truncate text-[5.5px] font-bold leading-none tracking-tight">
                                           {aylikTakvimRozetMetni(mevcut, iso, tatilMap)}
+                                        </span>
+                                      ) : buAy && resmi && !secimGoster && !mevcutGoster ? (
+                                        <span className="text-[6px] font-bold leading-none tracking-tight">
+                                          RT
                                         </span>
                                       ) : buAy &&
                                         yarim &&
@@ -2835,7 +2804,7 @@ export default function Home() {
                 Aktif personellerin izinlerini ise giris donumunu baz alip son X donem icin tek formda listeler.
               </p>
             </div>
-            <div className="flex flex-wrap items-end gap-2">
+            <div className="flex items-end gap-2">
               <div>
                 <span className={labelClass}>Son X Donem</span>
                 <input
@@ -2847,18 +2816,16 @@ export default function Home() {
                   onChange={(e) => setYillikFormSonXDonem(Number(e.target.value))}
                 />
               </div>
-              <div className="flex flex-col justify-end gap-1">
+              <div>
                 <span className={labelClass}>Disa aktar</span>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    type="button"
-                    disabled={yillikFormDisariAktariliyor || yillikFormSayfalari.length === 0}
-                    onClick={() => yillikFormIndirWord()}
-                    className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Word (.docx)
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  disabled={yillikFormDisariAktariliyor || yillikFormSayfalari.length === 0}
+                  onClick={() => void yillikFormIndirPdf()}
+                  className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  PDF
+                </button>
               </div>
             </div>
           </div>
@@ -2871,20 +2838,17 @@ export default function Home() {
             ) : (
               <div className="space-y-4">
                 {yillikFormSayfalari.map((r) => (
-                  <div
-                    key={r.personel.id}
-                    className="rounded-lg p-3"
-                    style={{ breakAfter: "page", pageBreakAfter: "always" }}
-                  >
-                    <div className="rounded border border-slate-200 p-2">
+                  <div key={r.personel.id} className="rounded-lg p-3">
+                    <div data-yillik-form-sayfa className="rounded border border-slate-200 bg-white p-2">
                       <div className="mb-2 text-center text-sm font-semibold text-slate-900">
                         YILLIK UCRETLI IZIN FORMU - SON {r.donemAdedi} DONEM
                       </div>
-                      <div className="mb-2 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+                      <div className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
                         <div><span className="font-semibold">Çalışan:</span> {personelGorunenAd(r.personel, personeller)}</div>
                         <div><span className="font-semibold">Iktisap Tarihi:</span> {isoToDdMmYyyy(r.iktisapIso)}</div>
                         <div><span className="font-semibold">Rapor Araligi:</span> {isoToDdMmYyyy(r.raporBasIso)} - {isoToDdMmYyyy(r.raporSonIso)}</div>
                         <div><span className="font-semibold">Toplam Gun:</span> {formatGunDegeri(r.toplamGun)}</div>
+                        <div><span className="font-semibold">Kalan Izin:</span> {formatGunDegeri(r.kalanIzinGun)}</div>
                       </div>
                       <table className="w-full border-collapse text-xs">
                         <thead>

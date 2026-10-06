@@ -194,6 +194,26 @@ function holidayDateFromRow(row: Record<string, unknown>): string | null {
   if (!m) return null;
   return `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
 }
+const KART_MAZERET_ARKAPLAN: Record<string, string> = {
+  yillik: "bg-sky-100/70",
+  rapor: "bg-pink-100/70",
+  dis: "bg-amber-100/80",
+  evlilik: "bg-purple-100/75",
+  cenaze: "bg-slate-100",
+  dogum: "bg-emerald-100/75",
+};
+function kartMazeretArkaplan(kod: string): string {
+  if (KART_MAZERET_ARKAPLAN[kod]) return KART_MAZERET_ARKAPLAN[kod];
+  const d = normalizeText(kod);
+  if (d.includes("mucbir") || d.includes("idari")) return "bg-fuchsia-100";
+  if (d.includes("rapor")) return "bg-pink-100/70";
+  if (d.includes("dis")) return "bg-amber-100/80";
+  if (d.includes("evlilik")) return "bg-purple-100/75";
+  if (d.includes("cenaze")) return "bg-slate-100";
+  if (d.includes("dogum")) return "bg-emerald-100/75";
+  if (d.includes("yillik")) return "bg-sky-100/70";
+  return "bg-white";
+}
 function getTakvimGunGolgeClass(durumRaw: string): string {
   const durum = normalizeText(durumRaw);
   if (!durum) return "";
@@ -1635,7 +1655,10 @@ export default function PdksPage() {
 
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" ref={aylikBakiyeKartRef}>
+        <section
+          className={`rounded-2xl border border-slate-200 p-6 shadow-sm transition-[background-color] duration-300 ease-out ${kartMazeretArkaplan(kartIzinTipi)}`}
+          ref={aylikBakiyeKartRef}
+        >
           <h2 className="text-lg font-semibold tracking-tight">Aylik Mesai Bakiye Karti</h2>
           <div className="mt-3 flex flex-nowrap items-center gap-1.5 overflow-x-auto">
             <div className="flex shrink-0 items-center gap-1.5">
